@@ -31,6 +31,9 @@ import {
   handleCustomBoostButton,
   handleCustomBoostSubmit,
   handleShopItemSelection,
+  handleTicketDeleteButton,
+  requestTicketDeletion,
+  sendDoneEmbed,
 } from "./tickets";
 import { SHOP_CATEGORIES, STAFF_USER_ID } from "./catalog";
 
@@ -350,16 +353,62 @@ async function handleCloseCommand(message: Message): Promise<void> {
     return;
   }
   const textChannel = message.channel as TextChannel;
-  const response = await closeTicketFromMessage(textChannel, message.member);
-  await message.reply({
-    content: response,
-    allowedMentions: { parse: [] },
-  });
+  const result = await closeTicketFromMessage(textChannel, message.member);
+  if (!result.closed && result.message) {
+    await message.reply({
+      content: result.message,
+      allowedMentions: { parse: [] },
+    });
+  }
+}
+
+async function handleDoneCommand(message: Message): Promise<void> {
+  if (!message.guild || !message.member) return;
+  if (message.channel.type !== ChannelType.GuildText) {
+    await message.reply("Use `.done` in a ticket channel.");
+    return;
+  }
+  const result = await sendDoneEmbed(
+    message.channel as TextChannel,
+    message.member,
+  );
+  if (!result.sent && result.message) {
+    await message.reply({
+      content: result.message,
+      allowedMentions: { parse: [] },
+    });
+  }
+}
+
+async function handleDeleteCommand(message: Message): Promise<void> {
+  if (!message.guild || !message.member) return;
+  if (message.channel.type !== ChannelType.GuildText) {
+    await message.reply("Use `.delete` in a ticket channel.");
+    return;
+  }
+  const result = await requestTicketDeletion(
+    message.channel as TextChannel,
+    message.member,
+  );
+  if (!result.requested && result.message) {
+    await message.reply({
+      content: result.message,
+      allowedMentions: { parse: [] },
+    });
+  }
 }
 
 async function handleMessage(message: Message): Promise<void> {
   if (message.author.bot || !message.guild) return;
   const content = message.content.trim();
+  if (/^\.delete(?:\s|$)/i.test(content)) {
+    await handleDeleteCommand(message);
+    return;
+  }
+  if (/^\.done(?:\s|$)/i.test(content)) {
+    await handleDoneCommand(message);
+    return;
+  }
   if (/^\.close(?:\s|$)/i.test(content)) {
     await handleCloseCommand(message);
     return;
@@ -399,6 +448,10 @@ async function handleInteraction(
   }
 
   if (interaction.isButton()) {
+    if (interaction.customId.startsWith("ticket:delete-")) {
+      await handleTicketDeleteButton(interaction);
+      return;
+    }
     if (interaction.customId === "shop:refresh" && interaction.guildId) {
       await interaction.deferUpdate();
       await refreshShopPanel(client, interaction.guildId);

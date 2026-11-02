@@ -23,7 +23,7 @@ export type TicketRecord = {
   guild_id: string;
   opener_user_id: string;
   product: string;
-  status: "open" | "closed";
+  status: "open" | "closed" | "deleted";
 };
 
 export async function ensureGuildSettings(
@@ -273,6 +273,15 @@ export async function closeTicket(channelId: string): Promise<void> {
     `UPDATE discord_tickets
      SET status = 'closed', closed_at = NOW()
      WHERE channel_id = $1 AND status = 'open'`,
+    [channelId],
+  );
+}
+
+export async function markTicketDeleted(channelId: string): Promise<void> {
+  await pool.query(
+    `UPDATE discord_tickets
+     SET status = 'deleted', closed_at = NOW()
+     WHERE channel_id = $1`,
     [channelId],
   );
 }

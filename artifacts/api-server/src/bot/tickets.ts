@@ -27,6 +27,7 @@ import {
   getTicket,
   getWhitelist,
   isWhitelisted,
+  markTicketDeleted,
   saveTicket,
 } from "./store";
 
@@ -340,17 +341,24 @@ export async function handleShopItemSelection(
 export async function closeTicketFromMessage(
   channel: TextChannel,
   member: GuildMember,
-): Promise<string> {
+): Promise<{ closed: boolean; message?: string }> {
   const record = await getTicket(channel.id);
   if (!record || record.status !== "open") {
-    return "This channel is not an open shop ticket.";
+    return {
+      closed: false,
+      message: "This channel is not an open shop ticket.",
+    };
   }
   const canClose =
     member.permissions.has(PermissionFlagsBits.Administrator) ||
     member.id === record.opener_user_id ||
     (await isWhitelisted(record.guild_id, member.id));
   if (!canClose) {
-    return "Only the ticket customer, whitelisted staff, or an administrator can close this ticket.";
+    return {
+      closed: false,
+      message:
+        "Only the ticket customer, whitelisted staff, or an administrator can close this ticket.",
+    };
   }
 
   await markTicketClosed(channel.id);
@@ -375,6 +383,169 @@ export async function closeTicketFromMessage(
     allowedMentions: { parse: [] },
   });
 
-  return "Ticket closed. The channel is saved for whitelisted staff and administrators.";
+  return { closed: true };
+}
+
+export async function sendDoneEmbed(
+  channel: TextChannel,
+  member: GuildMember,
+): Promise<{ sent: boolean; message?: string }> {
+  const record = await getTicket(channel.id);
+  if (!record || record.status !== "open") {
+    return { sent: false, message: "This channel is not an open shop ticket." };
+  }
+  const canSend =
+    member.permissions.has(PermissionFlagsBits.Administrator) ||
+    (await isWhitelisted(record.guild_id, member.id));
+  if (!canSend) {
+    return {
+      sent: false,
+      message: "Only whitelisted staff or an administrator can use `.done`.",
+    };
+  }
+
+  await channel.send({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0x17151d)
+        .setTitle("Purchase complete")
+        .setDescription(
+          `**Customer:** <@${record.opener_user_id}>\n\nHead over to <#1535992619153236109> and use this format \`+rep @clique37 (amount) (reason)\`.\n\nPlease submit a **SCREENSHOT**. Thanks for your purchase. <:865852discordclyde:1548061027520749641>`,
+        )
+        .setFooter({ text: "STOCKW SHOP" })
+        .setTimestamp(),
+    ],
+    allowedMentions: { parse: [] },
+  });
+  return { sent: true };
+}
+
+export async function requestTicketDeletion(
+  channel: TextChannel,
+  member: GuildMember,
+): Promise<{ requested: boolean; message?: string }> {
+  const record = await getTicket(channel.id);
+  if (!record || record.status === "deleted") {
+    return { requested: false, message: "This is not an active shop ticket." };
+  }
+  const canDelete =
+    member.permissions.has(PermissionFlagsBits.Administrator) ||
+    (await isWhitelisted(record.guild_id, member.id));
+  if (!canDelete) {
+    return {
+      requested: false,
+      message: "Only whitelisted staff or an administrator can delete tickets.",
+    };
+  }
+
+  await channel.send({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0xb42318)
+        .setTitle("Delete this ticket?")
+        .setDescription(
+          "This permanently deletes the ticket channel and all of its messages. This cannot be undone.",
+        )
+        .setFooter({ text: "STOCKW SHOP • Confirm only if you are sure." }),
+    ],
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`ticket:delete-confirm:${channel.id}:${member.id}`)
+          .setLabel("Delete ticket")
+          .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+          .setCustomId(`ticket:delete-cancel:${channel.id}:${member.id}`)
+          .setLabel("Cancel")
+          .setStyle(ButtonStyle.Secondary),
+      ),
+    ],
+    allowedMentions: { parse: [] },
+  });
+  return { requested: true };
+}
+
+export async function handleTicketDeleteButton(
+  interaction: ButtonInteraction,
+): Promise<void> {
+  const [prefix, action, channelId, requesterId] =
+    interaction.customId.split(":");
+  if (prefix !== "ticket" || !channelId || !requesterId) return;
+
+  if (interaction.user.id !== requesterId) {
+    await interaction.reply({
+      content: "Only the staff member who requested this deletion can confirm it.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const guild = interaction.guild;
+  const member = await guild?.members.fetch(interaction.user.id).catch(() => null);
+  if (
+    !guild ||
+    !member ||
+    (!member.permissions.has(PermissionFlagsBits.Administrator) &&
+      !(await isWhitelisted(guild.id, member.id)))
+  ) {
+    await interaction.reply({
+      content: "Only whitelisted staff or an administrator can delete tickets.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (action === "delete-cancel") {
+    await interaction.update({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x17151d)
+          .setTitle("Ticket deletion cancelled")
+          .setFooter({ text: "STOCKW SHOP" }),
+      ],
+      components: [],
+    });
+    return;
+  }
+  if (action !== "delete-confirm") return;
+
+  const record = await getTicket(channelId);
+  if (!record || record.guild_id !== guild.id || record.status === "deleted") {
+    await interaction.reply({
+      content: "This ticket has already been deleted or is no longer available.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  const channel = await guild.channels.fetch(channelId);
+  if (!channel || channel.type !== ChannelType.GuildText) {
+    await interaction.reply({
+      content: "The ticket channel could not be found.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try {
+    await channel.delete(`Ticket deletion confirmed by ${interaction.user.tag}`);
+  } catch (error) {
+    logger.error({ error, channelId }, "Could not delete ticket channel");
+    await interaction.editReply(
+      "I could not delete the ticket channel. Check that the bot has Manage Channels permission.",
+    );
+    return;
+  }
+
+  try {
+    await markTicketDeleted(channelId);
+  } catch (error) {
+    logger.error({ error, channelId }, "Could not update deleted ticket record");
+    await interaction.editReply(
+      "The ticket channel and messages were deleted, but its saved status could not be updated.",
+    );
+    return;
+  }
+  await interaction.editReply("Ticket and its messages have been deleted.");
 }
 
