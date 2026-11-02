@@ -324,7 +324,7 @@ async function handleVouch(message: Message): Promise<void> {
       },
     )
     .setThumbnail(target.displayAvatarURL({ size: 128 }))
-    .setFooter({ text: `${message.guild.name} • Vouch ${number}` })
+    .setFooter({ text: `STOCKW SHOP • ${message.guild.name} • Vouch ${number}` })
     .setTimestamp();
 
   await vouchChannel.send({

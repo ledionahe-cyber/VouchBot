@@ -57,7 +57,7 @@ export async function buildShopPayload(
 
   const embed = new EmbedBuilder()
     .setColor(shopColor)
-    .setAuthor({ name: "iStockw • SHOP" })
+    .setAuthor({ name: "STOCKW SHOP" })
     .setDescription("Cheap and reliable service.\nSelect a category below to start your order!")
     .addFields(
       { name: "Vouches", value: `**${settings.vouch_count.toLocaleString()}**`, inline: true },
@@ -156,7 +156,9 @@ export async function buildCategoryPayload(
     .setColor(shopColor)
     .setTitle(title)
     .setDescription(description)
-    .setFooter({ text: "Choose an item to open a private order ticket." });
+    .setFooter({
+      text: "STOCKW SHOP • Choose an item to open a private order ticket.",
+    });
 
   const select = new StringSelectMenuBuilder()
     .setCustomId(`shop:item:${category}`)

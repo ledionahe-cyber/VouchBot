@@ -122,7 +122,9 @@ export async function createOrderTicket(
       .setDescription(
         `**Customer:** <@${opener.id}>\n**Item:**\n${product}`,
       )
-      .setFooter({ text: "A staff member will help you shortly." })
+      .setFooter({
+        text: "STOCKW SHOP • A staff member will help you shortly.",
+      })
       .setTimestamp();
     await channel.send({
       content: `@everyone <@${opener.id}>`,
@@ -151,6 +153,7 @@ export async function createOrderTicket(
               .setDescription(
                 `**Channel:** <#${channel.id}>\n**Customer:** <@${opener.id}>\n**Item:** ${product.slice(0, 1500)}`,
               )
+              .setFooter({ text: "STOCKW SHOP • Ticket log" })
               .setTimestamp(),
           ],
           allowedMentions: { parse: [] },
@@ -359,6 +362,7 @@ export async function closeTicketFromMessage(
         .setColor(0x17151d)
         .setTitle("Ticket closed")
         .setDescription("This ticket has been closed and saved for staff.")
+        .setFooter({ text: "STOCKW SHOP" })
         .setTimestamp(),
     ],
     allowedMentions: { parse: [] },
