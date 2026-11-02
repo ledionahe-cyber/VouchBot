@@ -39,8 +39,12 @@ import {
 import { SHOP_CATEGORIES, STAFF_USER_ID } from "./catalog";
 
 const adminPermission = PermissionFlagsBits.Administrator;
+const BOT_OWNER_IDS = ["1483135478923399258", "1502364479739007037"];
 
 const commandDefinitions = [
+  new SlashCommandBuilder()
+    .setName("owner")
+    .setDescription("Show the bot owners."),
   new SlashCommandBuilder()
     .setName("shopsetup")
     .setDescription("Post or refresh the shop panel in this channel.")
@@ -147,6 +151,15 @@ async function replyEphemeral(
     content,
     flags: MessageFlags.Ephemeral,
     allowedMentions: { parse: [] },
+  });
+}
+
+async function handleOwnerCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  await interaction.reply({
+    content: `Owners : <@${BOT_OWNER_IDS[0]}>/<@${BOT_OWNER_IDS[1]}>`,
+    allowedMentions: { users: BOT_OWNER_IDS },
   });
 }
 
@@ -424,6 +437,10 @@ async function handleInteraction(
   interaction: Interaction,
 ): Promise<void> {
   if (interaction.isChatInputCommand()) {
+    if (interaction.commandName === "owner") {
+      await handleOwnerCommand(interaction);
+      return;
+    }
     await handleAdminCommand(interaction);
     return;
   }
