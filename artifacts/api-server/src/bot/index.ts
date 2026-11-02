@@ -15,9 +15,12 @@ import {
 } from "discord.js";
 import { logger } from "../lib/logger";
 import {
+  addToBlacklist,
   addToWhitelist,
   createVouch,
   ensureGuildSettings,
+  isBlacklisted,
+  removeFromBlacklist,
   removeFromWhitelist,
   removeRobloxAccount,
   saveRobloxAccount,
@@ -40,6 +43,7 @@ import { SHOP_CATEGORIES, STAFF_USER_ID } from "./catalog";
 
 const adminPermission = PermissionFlagsBits.Administrator;
 const BOT_OWNER_IDS = ["1483135478923399258", "1502364479739007037"];
+const VOUCH_ROLE_ID = "1535983891054067742";
 
 const commandDefinitions = [
   new SlashCommandBuilder()
@@ -96,6 +100,26 @@ const commandDefinitions = [
             .setDescription("The staff member to remove")
             .setRequired(true),
         ),
+    ),
+  new SlashCommandBuilder()
+    .setName("blacklist")
+    .setDescription("Block a user from browsing and buying in the shop.")
+    .setDefaultMemberPermissions(adminPermission)
+    .addUserOption((option) =>
+      option
+        .setName("user")
+        .setDescription("The user to block from the shop")
+        .setRequired(true),
+    ),
+  new SlashCommandBuilder()
+    .setName("unblacklist")
+    .setDescription("Restore a user's access to the shop.")
+    .setDefaultMemberPermissions(adminPermission)
+    .addUserOption((option) =>
+      option
+        .setName("user")
+        .setDescription("The user to restore")
+        .setRequired(true),
     ),
   new SlashCommandBuilder()
     .setName("robloxadd")
@@ -247,6 +271,28 @@ async function handleAdminCommand(
     return;
   }
 
+  if (interaction.commandName === "blacklist") {
+    const user = interaction.options.getUser("user", true);
+    await addToBlacklist(guildId, user.id);
+    await replyEphemeral(
+      interaction,
+      `${user.tag} is now blocked from browsing and buying in the shop.`,
+    );
+    return;
+  }
+
+  if (interaction.commandName === "unblacklist") {
+    const user = interaction.options.getUser("user", true);
+    const removed = await removeFromBlacklist(guildId, user.id);
+    await replyEphemeral(
+      interaction,
+      removed
+        ? `${user.tag} can use the shop again.`
+        : `${user.tag} was not on the shop blacklist.`,
+    );
+    return;
+  }
+
   if (interaction.commandName === "robloxadd") {
     const username = interaction.options.getString("username", true).trim();
     const price = interaction.options.getString("price", true).trim();
@@ -284,6 +330,15 @@ async function registerCommands(guild: Guild): Promise<void> {
 
 async function handleVouch(message: Message): Promise<void> {
   if (!message.guild || !message.member) return;
+  if (
+    !message.member.permissions.has(PermissionFlagsBits.Administrator) &&
+    !message.member.roles.cache.has(VOUCH_ROLE_ID)
+  ) {
+    await message.reply(
+      "You need the vouch role or Administrator permission to use +rep.",
+    );
+    return;
+  }
   const match = message.content.match(/^\+rep\s+(?:<@!?(\d+)>|(\d+))\s+([\s\S]+)$/i);
   const targetId = message.mentions.users.first()?.id ?? match?.[1] ?? match?.[2];
   const body = match?.[3]?.trim();
@@ -447,6 +502,17 @@ async function handleInteraction(
 
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId === "shop:category") {
+      if (
+        interaction.guildId &&
+        (await isBlacklisted(interaction.guildId, interaction.user.id))
+      ) {
+        await interaction.reply({
+          content: "You are blacklisted from using the shop.",
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [] },
+        });
+        return;
+      }
       const selected = interaction.values[0];
       if (
         selected &&
@@ -460,6 +526,17 @@ async function handleInteraction(
       return;
     }
     if (interaction.customId.startsWith("shop:item:")) {
+      if (
+        interaction.guildId &&
+        (await isBlacklisted(interaction.guildId, interaction.user.id))
+      ) {
+        await interaction.reply({
+          content: "You are blacklisted from using the shop.",
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [] },
+        });
+        return;
+      }
       await handleShopItemSelection(interaction, client);
       return;
     }
@@ -480,6 +557,17 @@ async function handleInteraction(
       return;
     }
     if (interaction.customId === "shop:custom-modal") {
+      if (
+        interaction.guildId &&
+        (await isBlacklisted(interaction.guildId, interaction.user.id))
+      ) {
+        await interaction.reply({
+          content: "You are blacklisted from using the shop.",
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [] },
+        });
+        return;
+      }
       await handleCustomBoostButton(interaction);
     }
     return;
@@ -489,6 +577,17 @@ async function handleInteraction(
     interaction.isModalSubmit() &&
     interaction.customId === "shop:custom-submit"
   ) {
+    if (
+      interaction.guildId &&
+      (await isBlacklisted(interaction.guildId, interaction.user.id))
+    ) {
+      await interaction.reply({
+        content: "You are blacklisted from using the shop.",
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [] },
+      });
+      return;
+    }
     await handleCustomBoostSubmit(interaction, client);
   }
 }

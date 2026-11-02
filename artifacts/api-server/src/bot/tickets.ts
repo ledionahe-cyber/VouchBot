@@ -27,6 +27,7 @@ import {
   getRobloxAccount,
   getTicket,
   getWhitelist,
+  isBlacklisted,
   isWhitelisted,
   markTicketDeleted,
   saveTicket,
@@ -55,6 +56,9 @@ export async function createOrderTicket(
   opener: GuildMember,
   product: string,
 ): Promise<TextChannel> {
+  if (await isBlacklisted(guild.id, opener.id)) {
+    throw new Error("You are blacklisted from using the shop.");
+  }
   const settings = await ensureGuildSettings(guild.id);
   if (!settings.ticket_category_id) {
     throw new Error("An administrator needs to run /ticketsetup first.");
@@ -394,6 +398,14 @@ export async function handlePaymentMethodSelection(
     await interaction.reply({
       content: "This is not an open shop ticket.",
       flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (await isBlacklisted(record.guild_id, interaction.user.id)) {
+    await interaction.reply({
+      content: "You are blacklisted from using the shop.",
+      flags: MessageFlags.Ephemeral,
+      allowedMentions: { parse: [] },
     });
     return;
   }

@@ -35,6 +35,21 @@ export const discordWhitelist = pgTable(
   (table) => [primaryKey({ columns: [table.guildId, table.userId] })],
 );
 
+export const discordBlacklist = pgTable(
+  "discord_blacklist",
+  {
+    guildId: varchar("guild_id", { length: 24 }).notNull(),
+    userId: varchar("user_id", { length: 24 }).notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.guildId, table.userId] }),
+    index("discord_blacklist_guild_idx").on(table.guildId),
+  ],
+);
+
 export const robloxAccounts = pgTable(
   "roblox_accounts",
   {

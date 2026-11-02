@@ -130,6 +130,42 @@ export async function removeFromWhitelist(
   return (result.rowCount ?? 0) > 0;
 }
 
+export async function addToBlacklist(
+  guildId: string,
+  userId: string,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO discord_blacklist (guild_id, user_id)
+     VALUES ($1, $2)
+     ON CONFLICT (guild_id, user_id) DO NOTHING`,
+    [guildId, userId],
+  );
+}
+
+export async function removeFromBlacklist(
+  guildId: string,
+  userId: string,
+): Promise<boolean> {
+  const result = await pool.query(
+    `DELETE FROM discord_blacklist WHERE guild_id = $1 AND user_id = $2`,
+    [guildId, userId],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function isBlacklisted(
+  guildId: string,
+  userId: string,
+): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM discord_blacklist
+     WHERE guild_id = $1 AND user_id = $2
+     LIMIT 1`,
+    [guildId, userId],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function saveRobloxAccount(
   guildId: string,
   username: string,
