@@ -1,20 +1,98 @@
-// Export your models here. Add one export per file
-// export * from "./posts";
-//
-// Each model/table should ideally be split into different files.
-// Each model/table should define a Drizzle table, insert schema, and types:
-//
-//   import { pgTable, text, serial } from "drizzle-orm/pg-core";
-//   import { createInsertSchema } from "drizzle-zod";
-//   import { z } from "zod/v4";
-//
-//   export const postsTable = pgTable("posts", {
-//     id: serial("id").primaryKey(),
-//     title: text("title").notNull(),
-//   });
-//
-//   export const insertPostSchema = createInsertSchema(postsTable).omit({ id: true });
-//   export type InsertPost = z.infer<typeof insertPostSchema>;
-//   export type Post = typeof postsTable.$inferSelect;
+import {
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  serial,
+  text,
+  timestamp,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/pg-core";
 
-export {}
+export const discordGuildSettings = pgTable("discord_guild_settings", {
+  guildId: varchar("guild_id", { length: 24 }).primaryKey(),
+  vouchCount: integer("vouch_count").notNull().default(62),
+  shopChannelId: varchar("shop_channel_id", { length: 24 }),
+  shopMessageId: varchar("shop_message_id", { length: 24 }),
+  vouchChannelId: varchar("vouch_channel_id", { length: 24 }),
+  ticketCategoryId: varchar("ticket_category_id", { length: 24 }),
+  ticketLogChannelId: varchar("ticket_log_channel_id", { length: 24 }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const discordWhitelist = pgTable(
+  "discord_whitelist",
+  {
+    guildId: varchar("guild_id", { length: 24 }).notNull(),
+    userId: varchar("user_id", { length: 24 }).notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.guildId, table.userId] })],
+);
+
+export const robloxAccounts = pgTable(
+  "roblox_accounts",
+  {
+    id: serial("id").primaryKey(),
+    guildId: varchar("guild_id", { length: 24 }).notNull(),
+    username: varchar("username", { length: 64 }).notNull(),
+    price: varchar("price", { length: 32 }).notNull(),
+    description: text("description").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("roblox_accounts_guild_username_unique").on(
+      table.guildId,
+      table.username,
+    ),
+    index("roblox_accounts_guild_idx").on(table.guildId),
+  ],
+);
+
+export const discordVouches = pgTable(
+  "discord_vouches",
+  {
+    id: serial("id").primaryKey(),
+    guildId: varchar("guild_id", { length: 24 }).notNull(),
+    vouchNumber: integer("vouch_number").notNull(),
+    targetUserId: varchar("target_user_id", { length: 24 }).notNull(),
+    authorUserId: varchar("author_user_id", { length: 24 }).notNull(),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("discord_vouches_guild_number_unique").on(
+      table.guildId,
+      table.vouchNumber,
+    ),
+    index("discord_vouches_guild_idx").on(table.guildId),
+  ],
+);
+
+export const discordTickets = pgTable(
+  "discord_tickets",
+  {
+    channelId: varchar("channel_id", { length: 24 }).primaryKey(),
+    guildId: varchar("guild_id", { length: 24 }).notNull(),
+    openerUserId: varchar("opener_user_id", { length: 24 }).notNull(),
+    product: text("product").notNull(),
+    status: varchar("status", { length: 12 }).notNull().default("open"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("discord_tickets_guild_status_idx").on(table.guildId, table.status),
+    index("discord_tickets_opener_idx").on(table.guildId, table.openerUserId),
+  ],
+);
