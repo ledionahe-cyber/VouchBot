@@ -5,6 +5,7 @@ import {
   ButtonStyle,
   ChannelType,
   EmbedBuilder,
+  MessageFlags,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
   type Client,
@@ -226,12 +227,12 @@ export async function buildCategoryResponse(
   if (!interaction.guild) {
     await interaction.reply({
       content: "This shop can only be used inside a server.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
   await interaction.reply({
     ...(await buildCategoryPayload(interaction.guild, category)),
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }

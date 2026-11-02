@@ -4,6 +4,7 @@ import {
   ButtonStyle,
   ChannelType,
   EmbedBuilder,
+  MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
   TextInputBuilder,
@@ -201,7 +202,7 @@ export async function handleCustomBoostSubmit(
   if (!interaction.guild || !interaction.guildId) {
     await interaction.reply({
       content: "This order can only be opened inside a server.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -212,14 +213,14 @@ export async function handleCustomBoostSubmit(
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
     await interaction.reply({
       content: "Enter a boost quantity from 1 to 100.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
   if (rawDuration !== "1" && rawDuration !== "3") {
     await interaction.reply({
       content: "Duration must be 1 or 3 months.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -234,12 +235,15 @@ export async function handleCustomBoostSubmit(
     );
     await interaction.reply({
       content: `Your order ticket is ready: <#${ticket.id}>`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not create your ticket.";
-    await interaction.reply({ content: message, ephemeral: true });
+    await interaction.reply({
+      content: message,
+      flags: MessageFlags.Ephemeral,
+    });
   }
 }
 
@@ -250,7 +254,7 @@ export async function handleShopItemSelection(
   if (!interaction.guild) {
     await interaction.reply({
       content: "This shop can only be used inside a server.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -259,7 +263,7 @@ export async function handleShopItemSelection(
   if (!value) {
     await interaction.reply({
       content: "Choose one of the available items.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -275,7 +279,7 @@ export async function handleShopItemSelection(
             .setStyle(ButtonStyle.Primary),
         ),
       ],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -286,7 +290,7 @@ export async function handleShopItemSelection(
     if (!Number.isInteger(accountId) || accountId < 1) {
       await interaction.reply({
         content: "That account listing is no longer available.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -294,7 +298,7 @@ export async function handleShopItemSelection(
     if (!account) {
       await interaction.reply({
         content: "That account listing is no longer available.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -306,7 +310,7 @@ export async function handleShopItemSelection(
   if (!product) {
     await interaction.reply({
       content: "That item is no longer available.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -321,12 +325,15 @@ export async function handleShopItemSelection(
     );
     await interaction.reply({
       content: `Your order ticket is ready: <#${ticket.id}>`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not create your ticket.";
-    await interaction.reply({ content: message, ephemeral: true });
+    await interaction.reply({
+      content: message,
+      flags: MessageFlags.Ephemeral,
+    });
   }
 }
 
