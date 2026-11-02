@@ -7,6 +7,7 @@ import {
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
+  StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
   type ButtonInteraction,
@@ -135,6 +136,30 @@ export async function createOrderTicket(
         parse: ["everyone"],
         users: [opener.id],
       },
+    });
+    await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x17151d)
+          .setTitle("Pick payment method")
+          .setDescription("Choose how you would like to pay.")
+          .setFooter({ text: "STOCKW SHOP" }),
+      ],
+      components: [
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId("ticket:payment-method")
+            .setPlaceholder("Pick payment method")
+            .addOptions(
+              { label: "PayPal", value: "paypal" },
+              { label: "LTC", value: "ltc" },
+              { label: "Tikkie", value: "tikkie" },
+              { label: "SOL", value: "sol" },
+              { label: "Crypto", value: "crypto" },
+              { label: "BTC", value: "btc" },
+            ),
+        ),
+      ],
     });
   } catch (error) {
     await channel.delete("Ticket setup failed");
@@ -336,6 +361,64 @@ export async function handleShopItemSelection(
       flags: MessageFlags.Ephemeral,
     });
   }
+}
+
+export async function handlePaymentMethodSelection(
+  interaction: StringSelectMenuInteraction,
+): Promise<void> {
+  const selected = interaction.values[0];
+  const paymentMethods: Record<string, string> = {
+    paypal: "PayPal",
+    ltc: "LTC",
+    tikkie: "Tikkie",
+    sol: "SOL",
+    crypto: "Crypto",
+    btc: "BTC",
+  };
+  const method = selected ? paymentMethods[selected] : undefined;
+  if (!method) {
+    await interaction.reply({
+      content: "Choose one of the available payment methods.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const record = await getTicket(interaction.channelId);
+  if (
+    !interaction.guild ||
+    !record ||
+    record.guild_id !== interaction.guild.id ||
+    record.status !== "open"
+  ) {
+    await interaction.reply({
+      content: "This is not an open shop ticket.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (interaction.user.id !== record.opener_user_id) {
+    await interaction.reply({
+      content: "Only the customer who opened this ticket can choose the payment method.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await interaction.update({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(0x17151d)
+        .setTitle("Payment method selected")
+        .setDescription(
+          `<@${record.opener_user_id}> has chosen to pay with **${method}**.`,
+        )
+        .setFooter({ text: "STOCKW SHOP" })
+        .setTimestamp(),
+    ],
+    components: [],
+    allowedMentions: { parse: [] },
+  });
 }
 
 export async function closeTicketFromMessage(

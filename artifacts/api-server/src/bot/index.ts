@@ -30,6 +30,7 @@ import {
   createOrderTicket,
   handleCustomBoostButton,
   handleCustomBoostSubmit,
+  handlePaymentMethodSelection,
   handleShopItemSelection,
   handleTicketDeleteButton,
   requestTicketDeletion,
@@ -443,6 +444,10 @@ async function handleInteraction(
     }
     if (interaction.customId.startsWith("shop:item:")) {
       await handleShopItemSelection(interaction, client);
+      return;
+    }
+    if (interaction.customId === "ticket:payment-method") {
+      await handlePaymentMethodSelection(interaction);
       return;
     }
   }
