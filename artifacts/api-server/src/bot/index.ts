@@ -498,7 +498,7 @@ export function startDiscordBot(): Client | undefined {
       { username: readyClient.user.tag, guildCount: readyClient.guilds.cache.size },
       "Discord bot connected",
     );
-    readyClient.user.setActivity("the shop");
+    readyClient.user.setActivity("STOCKW SHOP");
     for (const guild of readyClient.guilds.cache.values()) {
       void registerCommands(guild);
     }

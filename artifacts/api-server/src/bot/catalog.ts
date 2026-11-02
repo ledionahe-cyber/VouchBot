@@ -36,7 +36,12 @@ const BOOST_EMOJI = {
   name: "boost",
   animated: true,
 };
-const GIFT_EMOJI = { id: "1535994182861066290", name: "Gift" };
+const GIFT_EMOJI = {
+  id: "1535994182861066290",
+  name: "Gift",
+  animated: true,
+};
+export const GIFT_EMOJI_TEXT = "<a:Gift:1535994182861066290>";
 
 export const BOOST_PRODUCTS: ShopProduct[] = [
   {
@@ -100,10 +105,10 @@ const DECO_PRICES = [
 
 export const DECO_PRODUCTS: ShopProduct[] = DECO_PRICES.map(
   ([original, price], index) => ({
-    label: `Gift €${original} → €${price}`,
-    description: `Original €${original} → €${price}`,
+    label: `€${original} → €${price}`,
+    description: `Gift value €${original} • You pay €${price}`,
     value: `deco:${index}`,
-    details: `Profile decoration bundle ${index + 1} — original €${original}, shop price €${price}`,
+    details: `Profile deco — Gift €${original} → €${price}`,
     emoji: GIFT_EMOJI,
   }),
 );

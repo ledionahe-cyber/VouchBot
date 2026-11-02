@@ -17,6 +17,7 @@ import path from "node:path";
 import { logger } from "../lib/logger";
 import {
   BOOST_PRODUCTS,
+  GIFT_EMOJI_TEXT,
   getStaticProducts,
   robloxProduct,
   SHOP_CATEGORIES,
@@ -145,8 +146,8 @@ export async function buildCategoryPayload(
       category === "boost"
         ? `${BOOST_PRODUCTS.slice(0, 4).map((product) => `**${product.label}** — ${product.description.split(" — ").at(-1)}`).join("\n")}\n\nCustom quantity is also available.`
         : category === "decos"
-          ? `Frames, decos, nameplates, effects, and bundles.\n\n${products
-              .map((product) => `**${product.label}**\n${product.description}`)
+          ? `-# frames/deco/nameplates/effects/bundles\n\n${products
+              .map((product) => `${GIFT_EMOJI_TEXT} ${product.label}`)
               .join("\n")}`
           : products
             .map((product) => `**${product.label}**\n${product.description}`)
