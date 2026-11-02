@@ -2,6 +2,13 @@ import type { RobloxAccount } from "./store";
 
 export const STAFF_USER_ID = "1483135478923399258";
 
+const NITRO_EMOJI = {
+  id: "1548061005332881569",
+  name: "10337sparklesnitroboostt",
+};
+export const NITRO_EMOJI_TEXT =
+  "<:10337sparklesnitroboostt:1548061005332881569>";
+
 export const SHOP_CATEGORIES = [
   {
     value: "boost",
@@ -11,7 +18,7 @@ export const SHOP_CATEGORIES = [
   {
     value: "nitro",
     label: "Nitro",
-    emoji: { id: "1535994182861066290", name: "Gift" },
+    emoji: NITRO_EMOJI,
   },
   {
     value: "decos",
@@ -87,7 +94,7 @@ export const NITRO_PRODUCTS: ShopProduct[] = [
     description: "€5.00",
     value: "nitro:5",
     details: "Nitro boost — €5.00",
-    emoji: GIFT_EMOJI,
+    emoji: NITRO_EMOJI,
   },
 ];
 

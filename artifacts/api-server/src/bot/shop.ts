@@ -19,6 +19,7 @@ import {
   BOOST_PRODUCTS,
   GIFT_EMOJI_TEXT,
   getStaticProducts,
+  NITRO_EMOJI_TEXT,
   robloxProduct,
   SHOP_CATEGORIES,
   type ShopCategory,
@@ -145,7 +146,14 @@ export async function buildCategoryPayload(
     description =
       category === "boost"
         ? `${BOOST_PRODUCTS.slice(0, 4).map((product) => `**${product.label}** — ${product.description.split(" — ").at(-1)}`).join("\n")}\n\nCustom quantity is also available.`
-        : category === "decos"
+        : category === "nitro"
+          ? products
+              .map(
+                (product) =>
+                  `${NITRO_EMOJI_TEXT} **${product.label}** — ${product.description}`,
+              )
+              .join("\n")
+          : category === "decos"
           ? `-# frames/deco/nameplates/effects/bundles\n\n${products
               .map((product) => `${GIFT_EMOJI_TEXT} ${product.label}`)
               .join("\n")}`
