@@ -21,6 +21,11 @@ export const SHOP_CATEGORIES = [
     emoji: NITRO_EMOJI,
   },
   {
+    value: "accounts",
+    label: "Accounts",
+    emoji: { id: "1537498266243956827", name: "Discord" },
+  },
+  {
     value: "decos",
     label: "Profile Decos",
     emoji: { id: "1535994182861066290", name: "Gift" },
@@ -98,6 +103,38 @@ export const NITRO_PRODUCTS: ShopProduct[] = [
   },
 ];
 
+const NITRO_ACCOUNT_EMOJI = {
+  id: "1541888829173272636",
+  name: "rocket_animated",
+  animated: true,
+};
+const AGED_ACCOUNT_EMOJI = {
+  id: "1548061027520749641",
+  name: "865852discordclyde",
+};
+
+export const ACCOUNT_PRODUCTS: ShopProduct[] = [
+  {
+    label: "Nitro account",
+    description: "Select to open a private order ticket.",
+    value: "account:nitro",
+    details: "Nitro account",
+    emoji: NITRO_ACCOUNT_EMOJI,
+  },
+  {
+    label: "Aged account",
+    description: "Select to open a private order ticket.",
+    value: "account:aged",
+    details: "Aged account",
+    emoji: AGED_ACCOUNT_EMOJI,
+  },
+];
+
+export const ACCOUNT_EMOJI_TEXT = [
+  "<a:rocket_animated:1541888829173272636>",
+  "<:865852discordclyde:1548061027520749641>",
+];
+
 const DECO_PRICES = [
   ["4.99", "1.85"],
   ["5.99", "2.25"],
@@ -135,11 +172,17 @@ export function getStaticProducts(
 ): ShopProduct[] {
   if (category === "boost") return BOOST_PRODUCTS;
   if (category === "nitro") return NITRO_PRODUCTS;
+  if (category === "accounts") return ACCOUNT_PRODUCTS;
   return DECO_PRODUCTS;
 }
 
 export function productForStaticValue(value: string): ShopProduct | undefined {
-  return [...BOOST_PRODUCTS, ...NITRO_PRODUCTS, ...DECO_PRODUCTS].find(
+  return [
+    ...BOOST_PRODUCTS,
+    ...NITRO_PRODUCTS,
+    ...ACCOUNT_PRODUCTS,
+    ...DECO_PRODUCTS,
+  ].find(
     (product) => product.value === value,
   );
 }

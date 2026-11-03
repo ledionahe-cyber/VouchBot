@@ -317,11 +317,12 @@ async function handleAdminCommand(
   }
 }
 
-async function registerCommands(guild: Guild): Promise<void> {
+async function registerCommands(guild: Guild, client: Client): Promise<void> {
   try {
     await guild.commands.set(commandDefinitions.map((command) => command.toJSON()));
     await ensureGuildSettings(guild.id);
     await seedStaffWhitelist(guild.id, STAFF_USER_ID);
+    await refreshShopPanel(client, guild.id);
     logger.info({ guildId: guild.id }, "Discord commands registered");
   } catch (error) {
     logger.error({ error, guildId: guild.id }, "Could not register Discord commands");
@@ -334,9 +335,7 @@ async function handleVouch(message: Message): Promise<void> {
     !message.member.permissions.has(PermissionFlagsBits.Administrator) &&
     !message.member.roles.cache.has(VOUCH_ROLE_ID)
   ) {
-    await message.reply(
-      "You need the vouch role or Administrator permission to use +rep.",
-    );
+    await message.reply("nix doesn't allow you to use this command");
     return;
   }
   const match = message.content.match(/^\+rep\s+(?:<@!?(\d+)>|(\d+))\s+([\s\S]+)$/i);
@@ -616,12 +615,12 @@ export function startDiscordBot(): Client | undefined {
     );
     readyClient.user.setActivity("STOCKW SHOP");
     for (const guild of readyClient.guilds.cache.values()) {
-      void registerCommands(guild);
+      void registerCommands(guild, client);
     }
   });
 
   client.on(Events.GuildCreate, (guild) => {
-    void registerCommands(guild);
+    void registerCommands(guild, client);
   });
 
   client.on(Events.InteractionCreate, (interaction) => {

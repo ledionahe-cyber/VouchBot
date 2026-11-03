@@ -17,6 +17,7 @@ import path from "node:path";
 import { logger } from "../lib/logger";
 import {
   BOOST_PRODUCTS,
+  ACCOUNT_EMOJI_TEXT,
   GIFT_EMOJI_TEXT,
   getStaticProducts,
   NITRO_EMOJI_TEXT,
@@ -142,7 +143,9 @@ export async function buildCategoryPayload(
         ? "Server Boost"
         : category === "nitro"
           ? "Nitro"
-          : "Profile Decos";
+          : category === "accounts"
+            ? "Accounts"
+            : "Profile Decos";
     description =
       category === "boost"
         ? `${BOOST_PRODUCTS.slice(0, 4).map((product) => `**${product.label}** — ${product.description.split(" — ").at(-1)}`).join("\n")}\n\nCustom quantity is also available.`
@@ -153,13 +156,23 @@ export async function buildCategoryPayload(
                   `${NITRO_EMOJI_TEXT} **${product.label}** — ${product.description}`,
               )
               .join("\n")
-          : category === "decos"
-          ? `-# frames/deco/nameplates/effects/bundles\n\n${products
-              .map((product) => `${GIFT_EMOJI_TEXT} ${product.label}`)
-              .join("\n")}`
-          : products
-            .map((product) => `**${product.label}**\n${product.description}`)
-            .join("\n");
+          : category === "accounts"
+            ? `Choose an account type to open a private ticket.\n\n${products
+                .map(
+                  (product, index) =>
+                    `${ACCOUNT_EMOJI_TEXT[index]} **${product.label}**`,
+                )
+                .join("\n")}`
+            : category === "decos"
+              ? `-# frames/deco/nameplates/effects/bundles\n\n${products
+                  .map((product) => `${GIFT_EMOJI_TEXT} ${product.label}`)
+                  .join("\n")}`
+              : products
+                  .map(
+                    (product) =>
+                      `**${product.label}**\n${product.description}`,
+                  )
+                  .join("\n");
   }
 
   const embed = new EmbedBuilder()
