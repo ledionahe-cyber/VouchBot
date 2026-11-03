@@ -118,14 +118,14 @@ export const ACCOUNT_PRODUCTS: ShopProduct[] = [
     label: "Nitro account",
     description: "Select to open a private order ticket.",
     value: "account:nitro",
-    details: "Nitro account",
+    details: "NITRO ACCOUNT",
     emoji: NITRO_ACCOUNT_EMOJI,
   },
   {
     label: "Aged account",
     description: "Select to open a private order ticket.",
     value: "account:aged",
-    details: "Aged account",
+    details: "AGED ACCOUNT",
     emoji: AGED_ACCOUNT_EMOJI,
   },
 ];

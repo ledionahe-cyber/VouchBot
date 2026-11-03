@@ -48,6 +48,41 @@ export async function setBotShutdown(
   );
 }
 
+export async function isServerBlacklisted(guildId: string): Promise<boolean> {
+  const result = await pool.query<{ guild_id: string }>(
+    `SELECT guild_id
+     FROM discord_server_blacklist
+     WHERE guild_id = $1
+     LIMIT 1`,
+    [guildId],
+  );
+  return result.rows.length > 0;
+}
+
+export async function blacklistServer(
+  guildId: string,
+  blockedBy: string,
+): Promise<boolean> {
+  const result = await pool.query<{ guild_id: string }>(
+    `INSERT INTO discord_server_blacklist (guild_id, blocked_by)
+     VALUES ($1, $2)
+     ON CONFLICT (guild_id) DO NOTHING
+     RETURNING guild_id`,
+    [guildId, blockedBy],
+  );
+  return result.rows.length > 0;
+}
+
+export async function unblacklistServer(guildId: string): Promise<boolean> {
+  const result = await pool.query<{ guild_id: string }>(
+    `DELETE FROM discord_server_blacklist
+     WHERE guild_id = $1
+     RETURNING guild_id`,
+    [guildId],
+  );
+  return result.rows.length > 0;
+}
+
 export async function ensureGuildSettings(
   guildId: string,
 ): Promise<GuildSettings> {

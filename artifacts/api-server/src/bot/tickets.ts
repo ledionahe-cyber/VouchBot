@@ -348,21 +348,21 @@ export async function handleShopItemSelection(
     return;
   }
 
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
   let product: string | undefined;
   if (value.startsWith("roblox:")) {
     const accountId = Number(value.slice("roblox:".length));
     if (!Number.isInteger(accountId) || accountId < 1) {
-      await interaction.reply({
+      await interaction.editReply({
         content: "That account listing is no longer available.",
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
     const account = await getRobloxAccount(interaction.guild.id, accountId);
     if (!account) {
-      await interaction.reply({
+      await interaction.editReply({
         content: "That account listing is no longer available.",
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -372,9 +372,8 @@ export async function handleShopItemSelection(
   }
 
   if (!product) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "That item is no longer available.",
-      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -387,16 +386,14 @@ export async function handleShopItemSelection(
       member,
       product,
     );
-    await interaction.reply({
+    await interaction.editReply({
       content: `Your order ticket is ready: <#${ticket.id}>`,
-      flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not create your ticket.";
-    await interaction.reply({
+    await interaction.editReply({
       content: message,
-      flags: MessageFlags.Ephemeral,
     });
   }
 }

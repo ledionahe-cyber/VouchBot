@@ -17,10 +17,12 @@ import { logger } from "../lib/logger";
 import {
   addToBlacklist,
   addToWhitelist,
+  blacklistServer,
   createVouch,
   ensureGuildSettings,
   getBotShutdown,
   isBlacklisted,
+  isServerBlacklisted,
   removeFromBlacklist,
   removeFromWhitelist,
   removeRobloxAccount,
@@ -28,6 +30,7 @@ import {
   seedStaffWhitelist,
   setBotShutdown,
   setGuildField,
+  unblacklistServer,
 } from "./store";
 import { buildCategoryResponse, refreshShopPanel, updateShopSetup } from "./shop";
 import {
@@ -60,6 +63,31 @@ const commandDefinitions = [
   new SlashCommandBuilder()
     .setName("unshutdown")
     .setDescription("Restore bot commands after owner shutdown."),
+  new SlashCommandBuilder()
+    .setName("ping")
+    .setDescription("Show the bot's gateway latency."),
+  new SlashCommandBuilder()
+    .setName("sblacklist")
+    .setDescription("Block a server from using the bot.")
+    .addStringOption((option) =>
+      option
+        .setName("guild_id")
+        .setDescription("The Discord server ID")
+        .setMinLength(17)
+        .setMaxLength(20)
+        .setRequired(true),
+    ),
+  new SlashCommandBuilder()
+    .setName("unsblacklist")
+    .setDescription("Allow a blocked server to use the bot again.")
+    .addStringOption((option) =>
+      option
+        .setName("guild_id")
+        .setDescription("The Discord server ID")
+        .setMinLength(17)
+        .setMaxLength(20)
+        .setRequired(true),
+    ),
   new SlashCommandBuilder()
     .setName("shopsetup")
     .setDescription("Post or refresh the shop panel in this channel."),
@@ -202,7 +230,7 @@ async function handleShutdownCommand(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   if (interaction.user.id !== SHUTDOWN_OWNER_ID) {
-    await replyEphemeral(interaction, "Only the designated bot owner can shut down this bot.");
+    await replyEphemeral(interaction, "Only Ledion can use this command.");
     return;
   }
 
@@ -219,12 +247,46 @@ async function handleUnshutdownCommand(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   if (interaction.user.id !== SHUTDOWN_OWNER_ID) {
-    await replyEphemeral(interaction, "Only the designated bot owner can run /unshutdown.");
+    await replyEphemeral(interaction, "Only Ledion can use this command.");
     return;
   }
 
   await setBotShutdown(false, interaction.user.id);
   await replyEphemeral(interaction, "The bot is active again.");
+}
+
+async function handleServerBlacklistCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  if (interaction.user.id !== SHUTDOWN_OWNER_ID) {
+    await replyEphemeral(interaction, "Only Ledion can use this command.");
+    return;
+  }
+
+  const guildId = interaction.options.getString("guild_id", true).trim();
+  if (!/^\d{17,20}$/.test(guildId)) {
+    await replyEphemeral(interaction, "Enter a valid Discord server ID.");
+    return;
+  }
+
+  if (interaction.commandName === "sblacklist") {
+    const added = await blacklistServer(guildId, interaction.user.id);
+    await replyEphemeral(
+      interaction,
+      added
+        ? `Server ${guildId} is now blocked from using the bot.`
+        : `Server ${guildId} was already blocked.`,
+    );
+    return;
+  }
+
+  const removed = await unblacklistServer(guildId);
+  await replyEphemeral(
+    interaction,
+    removed
+      ? `Server ${guildId} can use the bot again.`
+      : `Server ${guildId} was not blocked.`,
+  );
 }
 
 async function handleAdminCommand(
@@ -517,8 +579,22 @@ async function handleDeleteCommand(message: Message): Promise<void> {
 
 async function handleMessage(message: Message): Promise<void> {
   if (message.author.bot || !message.guild) return;
-  if (await getBotShutdown()) return;
   const content = message.content.trim();
+  const isBotCommand =
+    /^(?:\.delete|\.done|\.close|\+rep)(?:\s|$)/i.test(content);
+  if (!isBotCommand) return;
+  if (await getBotShutdown()) return;
+  if (
+    message.author.id !== SHUTDOWN_OWNER_ID &&
+    (await isServerBlacklisted(message.guild.id))
+  ) {
+    await message.reply({
+      content: "This server is not authorized to use this bot.",
+      allowedMentions: { parse: [] },
+    });
+    return;
+  }
+
   if (/^\.delete(?:\s|$)/i.test(content)) {
     await handleDeleteCommand(message);
     return;
@@ -540,6 +616,32 @@ async function handleInteraction(
   client: Client,
   interaction: Interaction,
 ): Promise<void> {
+  if (
+    interaction.isChatInputCommand() &&
+    ["shutdown", "unshutdown", "sblacklist", "unsblacklist"].includes(
+      interaction.commandName,
+    ) &&
+    interaction.user.id !== SHUTDOWN_OWNER_ID
+  ) {
+    await replyEphemeral(interaction, "Only Ledion can use this command.");
+    return;
+  }
+
+  if (
+    interaction.guildId &&
+    interaction.user.id !== SHUTDOWN_OWNER_ID &&
+    (await isServerBlacklisted(interaction.guildId))
+  ) {
+    if (interaction.isRepliable()) {
+      await interaction.reply({
+        content: "This server is not authorized to use this bot.",
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [] },
+      });
+    }
+    return;
+  }
+
   if (await getBotShutdown()) {
     if (
       interaction.isChatInputCommand() &&
@@ -557,6 +659,17 @@ async function handleInteraction(
   }
 
   if (interaction.isChatInputCommand()) {
+    if (interaction.commandName === "ping") {
+      await replyEphemeral(interaction, `${Math.round(client.ws.ping)} ms`);
+      return;
+    }
+    if (
+      interaction.commandName === "sblacklist" ||
+      interaction.commandName === "unsblacklist"
+    ) {
+      await handleServerBlacklistCommand(interaction);
+      return;
+    }
     if (interaction.commandName === "owner") {
       await handleOwnerCommand(interaction);
       return;
@@ -700,14 +813,17 @@ export function startDiscordBot(): Client | undefined {
   client.on(Events.InteractionCreate, (interaction) => {
     void handleInteraction(client, interaction).catch(async (error: unknown) => {
       logger.error({ error }, "Discord interaction failed");
-      if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-        await interaction
-          .reply({
+      if (interaction.isRepliable()) {
+        const response = {
             content: "Something went wrong while handling that request.",
             flags: MessageFlags.Ephemeral,
             allowedMentions: { parse: [] },
-          })
-          .catch(() => undefined);
+          } as const;
+        if (interaction.deferred) {
+          await interaction.editReply(response).catch(() => undefined);
+        } else if (!interaction.replied) {
+          await interaction.reply(response).catch(() => undefined);
+        }
       }
     });
   });

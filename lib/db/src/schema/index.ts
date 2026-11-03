@@ -121,3 +121,11 @@ export const discordBotControl = pgTable("discord_bot_control", {
     .notNull()
     .defaultNow(),
 });
+
+export const discordServerBlacklist = pgTable("discord_server_blacklist", {
+  guildId: varchar("guild_id", { length: 24 }).primaryKey(),
+  blockedBy: varchar("blocked_by", { length: 24 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
