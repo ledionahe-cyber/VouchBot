@@ -26,6 +26,28 @@ export type TicketRecord = {
   status: "open" | "closed" | "deleted";
 };
 
+export async function getBotShutdown(): Promise<boolean> {
+  const result = await pool.query<{ is_shutdown: boolean }>(
+    `SELECT is_shutdown FROM discord_bot_control WHERE id = 1`,
+  );
+  return result.rows[0]?.is_shutdown ?? false;
+}
+
+export async function setBotShutdown(
+  isShutdown: boolean,
+  updatedBy: string,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO discord_bot_control (id, is_shutdown, updated_by, updated_at)
+     VALUES (1, $1, $2, NOW())
+     ON CONFLICT (id) DO UPDATE
+     SET is_shutdown = EXCLUDED.is_shutdown,
+         updated_by = EXCLUDED.updated_by,
+         updated_at = NOW()`,
+    [isShutdown, updatedBy],
+  );
+}
+
 export async function ensureGuildSettings(
   guildId: string,
 ): Promise<GuildSettings> {
@@ -302,6 +324,19 @@ export async function getTicket(
     [channelId],
   );
   return result.rows[0];
+}
+
+export async function listGuildTickets(
+  guildId: string,
+): Promise<TicketRecord[]> {
+  const result = await pool.query<TicketRecord>(
+    `SELECT channel_id, guild_id, opener_user_id, product, status
+     FROM discord_tickets
+     WHERE guild_id = $1 AND status <> 'deleted'
+     ORDER BY created_at ASC`,
+    [guildId],
+  );
+  return result.rows;
 }
 
 export async function closeTicket(channelId: string): Promise<void> {

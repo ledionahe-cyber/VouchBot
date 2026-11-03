@@ -19,12 +19,14 @@ import {
   addToWhitelist,
   createVouch,
   ensureGuildSettings,
+  getBotShutdown,
   isBlacklisted,
   removeFromBlacklist,
   removeFromWhitelist,
   removeRobloxAccount,
   saveRobloxAccount,
   seedStaffWhitelist,
+  setBotShutdown,
   setGuildField,
 } from "./store";
 import { buildCategoryResponse, refreshShopPanel, updateShopSetup } from "./shop";
@@ -35,28 +37,35 @@ import {
   handleCustomBoostSubmit,
   handlePaymentMethodSelection,
   handleShopItemSelection,
+  grantBotOwnerTicketAccess,
   handleTicketDeleteButton,
   requestTicketDeletion,
   sendDoneEmbed,
 } from "./tickets";
 import { SHOP_CATEGORIES, STAFF_USER_ID } from "./catalog";
-
-const adminPermission = PermissionFlagsBits.Administrator;
-const BOT_OWNER_IDS = ["1483135478923399258", "1502364479739007037"];
-const VOUCH_ROLE_ID = "1535983891054067742";
+import {
+  BOT_OWNER_IDS,
+  SHUTDOWN_OWNER_ID,
+  VOUCH_ROLE_ID,
+  isBotOwner,
+} from "./permissions";
 
 const commandDefinitions = [
   new SlashCommandBuilder()
     .setName("owner")
     .setDescription("Show the bot owners."),
   new SlashCommandBuilder()
+    .setName("shutdown")
+    .setDescription("Shut down the Discord bot."),
+  new SlashCommandBuilder()
+    .setName("unshutdown")
+    .setDescription("Restore bot commands after owner shutdown."),
+  new SlashCommandBuilder()
     .setName("shopsetup")
-    .setDescription("Post or refresh the shop panel in this channel.")
-    .setDefaultMemberPermissions(adminPermission),
+    .setDescription("Post or refresh the shop panel in this channel."),
   new SlashCommandBuilder()
     .setName("ticketsetup")
     .setDescription("Choose where private order tickets are created.")
-    .setDefaultMemberPermissions(adminPermission)
     .addChannelOption((option) =>
       option
         .setName("category")
@@ -73,12 +82,10 @@ const commandDefinitions = [
     ),
   new SlashCommandBuilder()
     .setName("vouchsetup")
-    .setDescription("Set this channel as the vouch channel.")
-    .setDefaultMemberPermissions(adminPermission),
+    .setDescription("Set this channel as the vouch channel."),
   new SlashCommandBuilder()
     .setName("whitelist")
     .setDescription("Manage who can see private order tickets.")
-    .setDefaultMemberPermissions(adminPermission)
     .addSubcommand((subcommand) =>
       subcommand
         .setName("add")
@@ -104,7 +111,6 @@ const commandDefinitions = [
   new SlashCommandBuilder()
     .setName("blacklist")
     .setDescription("Block a user from browsing and buying in the shop.")
-    .setDefaultMemberPermissions(adminPermission)
     .addUserOption((option) =>
       option
         .setName("user")
@@ -114,7 +120,6 @@ const commandDefinitions = [
   new SlashCommandBuilder()
     .setName("unblacklist")
     .setDescription("Restore a user's access to the shop.")
-    .setDefaultMemberPermissions(adminPermission)
     .addUserOption((option) =>
       option
         .setName("user")
@@ -124,7 +129,6 @@ const commandDefinitions = [
   new SlashCommandBuilder()
     .setName("robloxadd")
     .setDescription("Add or update a Roblox account listing.")
-    .setDefaultMemberPermissions(adminPermission)
     .addStringOption((option) =>
       option
         .setName("username")
@@ -149,7 +153,6 @@ const commandDefinitions = [
   new SlashCommandBuilder()
     .setName("remove")
     .setDescription("Remove a Roblox account listing.")
-    .setDefaultMemberPermissions(adminPermission)
     .addStringOption((option) =>
       option
         .setName("username")
@@ -163,8 +166,16 @@ function isAdministrator(
   interaction: ChatInputCommandInteraction,
 ): boolean {
   return Boolean(
-    interaction.memberPermissions?.has(PermissionFlagsBits.Administrator),
+    isBotOwner(interaction.user.id) ||
+      interaction.memberPermissions?.has(PermissionFlagsBits.Administrator),
   );
+}
+
+async function isShopBlacklisted(
+  guildId: string,
+  userId: string,
+): Promise<boolean> {
+  return !isBotOwner(userId) && (await isBlacklisted(guildId, userId));
 }
 
 async function replyEphemeral(
@@ -185,6 +196,35 @@ async function handleOwnerCommand(
     content: `Owners : <@${BOT_OWNER_IDS[0]}>/<@${BOT_OWNER_IDS[1]}>`,
     allowedMentions: { users: BOT_OWNER_IDS },
   });
+}
+
+async function handleShutdownCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  if (interaction.user.id !== SHUTDOWN_OWNER_ID) {
+    await replyEphemeral(interaction, "Only the designated bot owner can shut down this bot.");
+    return;
+  }
+
+  await setBotShutdown(true, interaction.user.id);
+  await interaction.reply({
+    content: "The bot is shut down for everyone. Only you can run /unshutdown to restore it.",
+    flags: MessageFlags.Ephemeral,
+    allowedMentions: { parse: [] },
+  });
+  logger.warn({ ownerId: interaction.user.id }, "Bot shutdown requested by owner");
+}
+
+async function handleUnshutdownCommand(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  if (interaction.user.id !== SHUTDOWN_OWNER_ID) {
+    await replyEphemeral(interaction, "Only the designated bot owner can run /unshutdown.");
+    return;
+  }
+
+  await setBotShutdown(false, interaction.user.id);
+  await replyEphemeral(interaction, "The bot is active again.");
 }
 
 async function handleAdminCommand(
@@ -252,6 +292,10 @@ async function handleAdminCommand(
     if (subcommand === "add") {
       await addToWhitelist(guildId, user.id);
       await replyEphemeral(interaction, `${user.tag} can now see and handle tickets.`);
+      return;
+    }
+    if (BOT_OWNER_IDS.includes(user.id)) {
+      await replyEphemeral(interaction, "Bot owners cannot be removed from ticket access.");
       return;
     }
     if (user.id === STAFF_USER_ID) {
@@ -322,6 +366,10 @@ async function registerCommands(guild: Guild, client: Client): Promise<void> {
     await guild.commands.set(commandDefinitions.map((command) => command.toJSON()));
     await ensureGuildSettings(guild.id);
     await seedStaffWhitelist(guild.id, STAFF_USER_ID);
+    for (const ownerId of BOT_OWNER_IDS) {
+      await seedStaffWhitelist(guild.id, ownerId);
+    }
+    await grantBotOwnerTicketAccess(guild, BOT_OWNER_IDS);
     await refreshShopPanel(client, guild.id);
     logger.info({ guildId: guild.id }, "Discord commands registered");
   } catch (error) {
@@ -332,6 +380,7 @@ async function registerCommands(guild: Guild, client: Client): Promise<void> {
 async function handleVouch(message: Message): Promise<void> {
   if (!message.guild || !message.member) return;
   if (
+    !isBotOwner(message.author.id) &&
     !message.member.permissions.has(PermissionFlagsBits.Administrator) &&
     !message.member.roles.cache.has(VOUCH_ROLE_ID)
   ) {
@@ -468,6 +517,7 @@ async function handleDeleteCommand(message: Message): Promise<void> {
 
 async function handleMessage(message: Message): Promise<void> {
   if (message.author.bot || !message.guild) return;
+  if (await getBotShutdown()) return;
   const content = message.content.trim();
   if (/^\.delete(?:\s|$)/i.test(content)) {
     await handleDeleteCommand(message);
@@ -490,9 +540,33 @@ async function handleInteraction(
   client: Client,
   interaction: Interaction,
 ): Promise<void> {
+  if (await getBotShutdown()) {
+    if (
+      interaction.isChatInputCommand() &&
+      interaction.commandName === "unshutdown"
+    ) {
+      await handleUnshutdownCommand(interaction);
+    } else if (interaction.isRepliable()) {
+      await interaction.reply({
+        content: "The bot is shut down. Only its owner can use /unshutdown.",
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [] },
+      });
+    }
+    return;
+  }
+
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === "owner") {
       await handleOwnerCommand(interaction);
+      return;
+    }
+    if (interaction.commandName === "shutdown") {
+      await handleShutdownCommand(interaction);
+      return;
+    }
+    if (interaction.commandName === "unshutdown") {
+      await handleUnshutdownCommand(interaction);
       return;
     }
     await handleAdminCommand(interaction);
@@ -503,7 +577,7 @@ async function handleInteraction(
     if (interaction.customId === "shop:category") {
       if (
         interaction.guildId &&
-        (await isBlacklisted(interaction.guildId, interaction.user.id))
+        (await isShopBlacklisted(interaction.guildId, interaction.user.id))
       ) {
         await interaction.reply({
           content: "You are blacklisted from using the shop.",
@@ -527,7 +601,7 @@ async function handleInteraction(
     if (interaction.customId.startsWith("shop:item:")) {
       if (
         interaction.guildId &&
-        (await isBlacklisted(interaction.guildId, interaction.user.id))
+        (await isShopBlacklisted(interaction.guildId, interaction.user.id))
       ) {
         await interaction.reply({
           content: "You are blacklisted from using the shop.",
@@ -558,7 +632,7 @@ async function handleInteraction(
     if (interaction.customId === "shop:custom-modal") {
       if (
         interaction.guildId &&
-        (await isBlacklisted(interaction.guildId, interaction.user.id))
+        (await isShopBlacklisted(interaction.guildId, interaction.user.id))
       ) {
         await interaction.reply({
           content: "You are blacklisted from using the shop.",
@@ -578,7 +652,7 @@ async function handleInteraction(
   ) {
     if (
       interaction.guildId &&
-      (await isBlacklisted(interaction.guildId, interaction.user.id))
+      (await isShopBlacklisted(interaction.guildId, interaction.user.id))
     ) {
       await interaction.reply({
         content: "You are blacklisted from using the shop.",
@@ -613,7 +687,7 @@ export function startDiscordBot(): Client | undefined {
       { username: readyClient.user.tag, guildCount: readyClient.guilds.cache.size },
       "Discord bot connected",
     );
-    readyClient.user.setActivity("STOCKW SHOP");
+    readyClient.user.setActivity("/stockw cheap and fast");
     for (const guild of readyClient.guilds.cache.values()) {
       void registerCommands(guild, client);
     }

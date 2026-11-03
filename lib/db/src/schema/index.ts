@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   pgTable,
@@ -111,3 +112,12 @@ export const discordTickets = pgTable(
     index("discord_tickets_opener_idx").on(table.guildId, table.openerUserId),
   ],
 );
+
+export const discordBotControl = pgTable("discord_bot_control", {
+  id: integer("id").primaryKey().default(1),
+  isShutdown: boolean("is_shutdown").notNull().default(false),
+  updatedBy: varchar("updated_by", { length: 24 }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

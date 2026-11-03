@@ -20,6 +20,7 @@ import {
 } from "discord.js";
 import { logger } from "../lib/logger";
 import { productForStaticValue, robloxProduct } from "./catalog";
+import { isBotOwner } from "./permissions";
 import {
   closeTicket as markTicketClosed,
   ensureGuildSettings,
@@ -29,6 +30,7 @@ import {
   getWhitelist,
   isBlacklisted,
   isWhitelisted,
+  listGuildTickets,
   markTicketDeleted,
   saveTicket,
 } from "./store";
@@ -56,7 +58,7 @@ export async function createOrderTicket(
   opener: GuildMember,
   product: string,
 ): Promise<TextChannel> {
-  if (await isBlacklisted(guild.id, opener.id)) {
+  if (!isBotOwner(opener.id) && (await isBlacklisted(guild.id, opener.id))) {
     throw new Error("You are blacklisted from using the shop.");
   }
   const settings = await ensureGuildSettings(guild.id);
@@ -196,6 +198,38 @@ export async function createOrderTicket(
   }
 
   return channel;
+}
+
+export async function grantBotOwnerTicketAccess(
+  guild: Guild,
+  ownerIds: readonly string[],
+): Promise<void> {
+  const tickets = await listGuildTickets(guild.id);
+  for (const ticket of tickets) {
+    const channel = await guild.channels.fetch(ticket.channel_id).catch(() => null);
+    if (!channel || channel.type !== ChannelType.GuildText) continue;
+
+    for (const ownerId of ownerIds) {
+      try {
+        await channel.permissionOverwrites.edit(
+          ownerId,
+          {
+            ViewChannel: true,
+            SendMessages: true,
+            ReadMessageHistory: true,
+            AttachFiles: true,
+            EmbedLinks: true,
+          },
+          { reason: "Grant bot owner access to existing shop tickets" },
+        );
+      } catch (error) {
+        logger.warn(
+          { error, guildId: guild.id, channelId: channel.id, ownerId },
+          "Could not grant bot owner access to ticket",
+        );
+      }
+    }
+  }
 }
 
 export async function handleCustomBoostButton(
@@ -401,7 +435,10 @@ export async function handlePaymentMethodSelection(
     });
     return;
   }
-  if (await isBlacklisted(record.guild_id, interaction.user.id)) {
+  if (
+    !isBotOwner(interaction.user.id) &&
+    (await isBlacklisted(record.guild_id, interaction.user.id))
+  ) {
     await interaction.reply({
       content: "You are blacklisted from using the shop.",
       flags: MessageFlags.Ephemeral,
@@ -445,6 +482,7 @@ export async function closeTicketFromMessage(
     };
   }
   const canClose =
+    isBotOwner(member.id) ||
     member.permissions.has(PermissionFlagsBits.Administrator) ||
     member.id === record.opener_user_id ||
     (await isWhitelisted(record.guild_id, member.id));
@@ -490,6 +528,7 @@ export async function sendDoneEmbed(
     return { sent: false, message: "This channel is not an open shop ticket." };
   }
   const canSend =
+    isBotOwner(member.id) ||
     member.permissions.has(PermissionFlagsBits.Administrator) ||
     (await isWhitelisted(record.guild_id, member.id));
   if (!canSend) {
@@ -524,6 +563,7 @@ export async function requestTicketDeletion(
     return { requested: false, message: "This is not an active shop ticket." };
   }
   const canDelete =
+    isBotOwner(member.id) ||
     member.permissions.has(PermissionFlagsBits.Administrator) ||
     (await isWhitelisted(record.guild_id, member.id));
   if (!canDelete) {
@@ -580,7 +620,8 @@ export async function handleTicketDeleteButton(
   if (
     !guild ||
     !member ||
-    (!member.permissions.has(PermissionFlagsBits.Administrator) &&
+    (!isBotOwner(member.id) &&
+      !member.permissions.has(PermissionFlagsBits.Administrator) &&
       !(await isWhitelisted(guild.id, member.id)))
   ) {
     await interaction.reply({
