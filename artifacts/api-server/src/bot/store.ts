@@ -33,10 +33,7 @@ export async function getBotShutdown(): Promise<boolean> {
   return result.rows[0]?.is_shutdown ?? false;
 }
 
-export async function setBotShutdown(
-  isShutdown: boolean,
-  updatedBy: string,
-): Promise<void> {
+export async function setBotShutdown(isShutdown: boolean, updatedBy: string): Promise<void> {
   await pool.query(
     `INSERT INTO discord_bot_control (id, is_shutdown, updated_by, updated_at)
      VALUES (1, $1, $2, NOW())
@@ -49,21 +46,15 @@ export async function setBotShutdown(
 }
 
 export async function isServerBlacklisted(guildId: string): Promise<boolean> {
-  const result = await pool.query<{ guild_id: string }>(
-    `SELECT guild_id
-     FROM discord_server_blacklist
-     WHERE guild_id = $1
-     LIMIT 1`,
+  const result = await pool.query(
+    `SELECT 1 FROM discord_server_blacklist WHERE guild_id = $1 LIMIT 1`,
     [guildId],
   );
   return result.rows.length > 0;
 }
 
-export async function blacklistServer(
-  guildId: string,
-  blockedBy: string,
-): Promise<boolean> {
-  const result = await pool.query<{ guild_id: string }>(
+export async function blacklistServer(guildId: string, blockedBy: string): Promise<boolean> {
+  const result = await pool.query(
     `INSERT INTO discord_server_blacklist (guild_id, blocked_by)
      VALUES ($1, $2)
      ON CONFLICT (guild_id) DO NOTHING
@@ -74,31 +65,27 @@ export async function blacklistServer(
 }
 
 export async function unblacklistServer(guildId: string): Promise<boolean> {
-  const result = await pool.query<{ guild_id: string }>(
-    `DELETE FROM discord_server_blacklist
-     WHERE guild_id = $1
-     RETURNING guild_id`,
+  const result = await pool.query(
+    `DELETE FROM discord_server_blacklist WHERE guild_id = $1 RETURNING guild_id`,
     [guildId],
   );
   return result.rows.length > 0;
 }
 
-export async function ensureGuildSettings(
-  guildId: string,
-): Promise<GuildSettings> {
+export async function ensureGuildSettings(guildId: string): Promise<GuildSettings> {
   await pool.query(
     `INSERT INTO discord_guild_settings (guild_id)
-     VALUES ($1)
-     ON CONFLICT (guild_id) DO NOTHING`,
+     VALUES ($1) ON CONFLICT (guild_id) DO NOTHING`,
     [guildId],
   );
+
   const result = await pool.query<GuildSettings>(
     `SELECT guild_id, vouch_count, shop_channel_id, shop_message_id,
             vouch_channel_id, ticket_category_id, ticket_log_channel_id
-     FROM discord_guild_settings
-     WHERE guild_id = $1`,
+     FROM discord_guild_settings WHERE guild_id = $1`,
     [guildId],
   );
+
   const settings = result.rows[0];
   if (!settings) throw new Error("Could not load server settings");
   return settings;
@@ -106,12 +93,8 @@ export async function ensureGuildSettings(
 
 export async function setGuildField(
   guildId: string,
-  field:
-    | "shop_channel_id"
-    | "shop_message_id"
-    | "vouch_channel_id"
-    | "ticket_category_id"
-    | "ticket_log_channel_id",
+  field: "shop_channel_id" | "shop_message_id" | "vouch_channel_id" |
+    "ticket_category_id" | "ticket_log_channel_id",
   value: string | null,
 ): Promise<void> {
   const allowedFields = new Set([
@@ -121,24 +104,22 @@ export async function setGuildField(
     "ticket_category_id",
     "ticket_log_channel_id",
   ]);
+
   if (!allowedFields.has(field)) throw new Error("Invalid server setting");
+
   await ensureGuildSettings(guildId);
+
   await pool.query(
-    `UPDATE discord_guild_settings
-     SET ${field} = $1, updated_at = NOW()
+    `UPDATE discord_guild_settings SET ${field} = $1, updated_at = NOW()
      WHERE guild_id = $2`,
     [value, guildId],
   );
 }
 
-export async function seedStaffWhitelist(
-  guildId: string,
-  staffUserId: string,
-): Promise<void> {
+export async function seedStaffWhitelist(guildId: string, staffUserId: string): Promise<void> {
   await pool.query(
     `INSERT INTO discord_whitelist (guild_id, user_id)
-     VALUES ($1, $2)
-     ON CONFLICT (guild_id, user_id) DO NOTHING`,
+     VALUES ($1, $2) ON CONFLICT (guild_id, user_id) DO NOTHING`,
     [guildId, staffUserId],
   );
 }
@@ -151,35 +132,24 @@ export async function getWhitelist(guildId: string): Promise<string[]> {
   return result.rows.map((row) => row.user_id);
 }
 
-export async function isWhitelisted(
-  guildId: string,
-  userId: string,
-): Promise<boolean> {
+export async function isWhitelisted(guildId: string, userId: string): Promise<boolean> {
   const result = await pool.query(
     `SELECT 1 FROM discord_whitelist
-     WHERE guild_id = $1 AND user_id = $2
-     LIMIT 1`,
+     WHERE guild_id = $1 AND user_id = $2 LIMIT 1`,
     [guildId, userId],
   );
   return (result.rowCount ?? 0) > 0;
 }
 
-export async function addToWhitelist(
-  guildId: string,
-  userId: string,
-): Promise<void> {
+export async function addToWhitelist(guildId: string, userId: string): Promise<void> {
   await pool.query(
     `INSERT INTO discord_whitelist (guild_id, user_id)
-     VALUES ($1, $2)
-     ON CONFLICT (guild_id, user_id) DO NOTHING`,
+     VALUES ($1, $2) ON CONFLICT (guild_id, user_id) DO NOTHING`,
     [guildId, userId],
   );
 }
 
-export async function removeFromWhitelist(
-  guildId: string,
-  userId: string,
-): Promise<boolean> {
+export async function removeFromWhitelist(guildId: string, userId: string): Promise<boolean> {
   const result = await pool.query(
     `DELETE FROM discord_whitelist WHERE guild_id = $1 AND user_id = $2`,
     [guildId, userId],
@@ -187,22 +157,15 @@ export async function removeFromWhitelist(
   return (result.rowCount ?? 0) > 0;
 }
 
-export async function addToBlacklist(
-  guildId: string,
-  userId: string,
-): Promise<void> {
+export async function addToBlacklist(guildId: string, userId: string): Promise<void> {
   await pool.query(
     `INSERT INTO discord_blacklist (guild_id, user_id)
-     VALUES ($1, $2)
-     ON CONFLICT (guild_id, user_id) DO NOTHING`,
+     VALUES ($1, $2) ON CONFLICT (guild_id, user_id) DO NOTHING`,
     [guildId, userId],
   );
 }
 
-export async function removeFromBlacklist(
-  guildId: string,
-  userId: string,
-): Promise<boolean> {
+export async function removeFromBlacklist(guildId: string, userId: string): Promise<boolean> {
   const result = await pool.query(
     `DELETE FROM discord_blacklist WHERE guild_id = $1 AND user_id = $2`,
     [guildId, userId],
@@ -210,14 +173,10 @@ export async function removeFromBlacklist(
   return (result.rowCount ?? 0) > 0;
 }
 
-export async function isBlacklisted(
-  guildId: string,
-  userId: string,
-): Promise<boolean> {
+export async function isBlacklisted(guildId: string, userId: string): Promise<boolean> {
   const result = await pool.query(
     `SELECT 1 FROM discord_blacklist
-     WHERE guild_id = $1 AND user_id = $2
-     LIMIT 1`,
+     WHERE guild_id = $1 AND user_id = $2 LIMIT 1`,
     [guildId, userId],
   );
   return (result.rowCount ?? 0) > 0;
@@ -238,10 +197,7 @@ export async function saveRobloxAccount(
   );
 }
 
-export async function removeRobloxAccount(
-  guildId: string,
-  username: string,
-): Promise<boolean> {
+export async function removeRobloxAccount(guildId: string, username: string): Promise<boolean> {
   const result = await pool.query(
     `DELETE FROM roblox_accounts
      WHERE guild_id = $1 AND LOWER(username) = LOWER($2)`,
@@ -250,27 +206,19 @@ export async function removeRobloxAccount(
   return (result.rowCount ?? 0) > 0;
 }
 
-export async function listRobloxAccounts(
-  guildId: string,
-): Promise<RobloxAccount[]> {
+export async function listRobloxAccounts(guildId: string): Promise<RobloxAccount[]> {
   const result = await pool.query<RobloxAccount>(
     `SELECT id, guild_id, username, price, description
-     FROM roblox_accounts
-     WHERE guild_id = $1
-     ORDER BY username ASC`,
+     FROM roblox_accounts WHERE guild_id = $1 ORDER BY username ASC`,
     [guildId],
   );
   return result.rows;
 }
 
-export async function getRobloxAccount(
-  guildId: string,
-  id: number,
-): Promise<RobloxAccount | undefined> {
+export async function getRobloxAccount(guildId: string, id: number): Promise<RobloxAccount | undefined> {
   const result = await pool.query<RobloxAccount>(
     `SELECT id, guild_id, username, price, description
-     FROM roblox_accounts
-     WHERE guild_id = $1 AND id = $2`,
+     FROM roblox_accounts WHERE guild_id = $1 AND id = $2`,
     [guildId, id],
   );
   return result.rows[0];
@@ -283,35 +231,33 @@ export async function createVouch(input: {
   body: string;
 }): Promise<number> {
   const connection = await pool.connect();
+
   try {
     await connection.query("BEGIN");
+
     await connection.query(
       `INSERT INTO discord_guild_settings (guild_id)
-       VALUES ($1)
-       ON CONFLICT (guild_id) DO NOTHING`,
+       VALUES ($1) ON CONFLICT (guild_id) DO NOTHING`,
       [input.guildId],
     );
+
     const result = await connection.query<{ vouch_count: number }>(
       `UPDATE discord_guild_settings
        SET vouch_count = vouch_count + 1, updated_at = NOW()
-       WHERE guild_id = $1
-       RETURNING vouch_count`,
+       WHERE guild_id = $1 RETURNING vouch_count`,
       [input.guildId],
     );
+
     const number = result.rows[0]?.vouch_count;
     if (number === undefined) throw new Error("Could not allocate vouch number");
+
     await connection.query(
       `INSERT INTO discord_vouches
          (guild_id, vouch_number, target_user_id, author_user_id, body)
        VALUES ($1, $2, $3, $4, $5)`,
-      [
-        input.guildId,
-        number,
-        input.targetUserId,
-        input.authorUserId,
-        input.body,
-      ],
+      [input.guildId, number, input.targetUserId, input.authorUserId, input.body],
     );
+
     await connection.query("COMMIT");
     return number;
   } catch (error) {
@@ -322,6 +268,20 @@ export async function createVouch(input: {
   }
 }
 
+export async function findOpenTicketsForUser(
+  guildId: string,
+  userId: string,
+): Promise<TicketRecord[]> {
+  const result = await pool.query<TicketRecord>(
+    `SELECT channel_id, guild_id, opener_user_id, product, status
+     FROM discord_tickets
+     WHERE guild_id = $1 AND opener_user_id = $2 AND status = 'open'
+     ORDER BY created_at DESC`,
+    [guildId, userId],
+  );
+  return result.rows;
+}
+
 export async function findOpenTicketForUser(
   guildId: string,
   userId: string,
@@ -330,7 +290,7 @@ export async function findOpenTicketForUser(
     `SELECT channel_id, guild_id, opener_user_id, product, status
      FROM discord_tickets
      WHERE guild_id = $1 AND opener_user_id = $2 AND status = 'open'
-     LIMIT 1`,
+     ORDER BY created_at DESC LIMIT 1`,
     [guildId, userId],
   );
   return result.rows[0];
@@ -344,15 +304,19 @@ export async function saveTicket(
 ): Promise<void> {
   await pool.query(
     `INSERT INTO discord_tickets
-       (channel_id, guild_id, opener_user_id, product)
-     VALUES ($1, $2, $3, $4)`,
+       (channel_id, guild_id, opener_user_id, product, status)
+     VALUES ($1, $2, $3, $4, 'open')
+     ON CONFLICT (channel_id) DO UPDATE
+       SET guild_id = EXCLUDED.guild_id,
+           opener_user_id = EXCLUDED.opener_user_id,
+           product = EXCLUDED.product,
+           status = 'open',
+           closed_at = NULL`,
     [channelId, guildId, openerUserId, product],
   );
 }
 
-export async function getTicket(
-  channelId: string,
-): Promise<TicketRecord | undefined> {
+export async function getTicket(channelId: string): Promise<TicketRecord | undefined> {
   const result = await pool.query<TicketRecord>(
     `SELECT channel_id, guild_id, opener_user_id, product, status
      FROM discord_tickets WHERE channel_id = $1 LIMIT 1`,
@@ -361,9 +325,7 @@ export async function getTicket(
   return result.rows[0];
 }
 
-export async function listGuildTickets(
-  guildId: string,
-): Promise<TicketRecord[]> {
+export async function listGuildTickets(guildId: string): Promise<TicketRecord[]> {
   const result = await pool.query<TicketRecord>(
     `SELECT channel_id, guild_id, opener_user_id, product, status
      FROM discord_tickets
@@ -387,7 +349,7 @@ export async function markTicketDeleted(channelId: string): Promise<void> {
   await pool.query(
     `UPDATE discord_tickets
      SET status = 'deleted', closed_at = NOW()
-     WHERE channel_id = $1`,
+     WHERE channel_id = $1 AND status <> 'deleted'`,
     [channelId],
   );
 }

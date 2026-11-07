@@ -4,6 +4,7 @@ import {
   ButtonStyle,
   ChannelType,
   EmbedBuilder,
+  LabelBuilder,
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
@@ -18,13 +19,15 @@ import {
   type StringSelectMenuInteraction,
   type TextChannel,
 } from "discord.js";
+
 import { logger } from "../lib/logger";
 import { productForStaticValue, robloxProduct } from "./catalog";
 import { isBotOwner } from "./permissions";
+
 import {
   closeTicket as markTicketClosed,
   ensureGuildSettings,
-  findOpenTicketForUser,
+  findOpenTicketsForUser,
   getRobloxAccount,
   getTicket,
   getWhitelist,
@@ -49,7 +52,41 @@ function safeChannelPart(value: string): string {
     .replace(/[^a-z0-9-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 45);
+
   return result || "order";
+}
+
+/**
+ * Checks every database-open ticket for this user.
+ * If its Discord channel no longer exists, marks the record deleted.
+ * Returns a real, existing open ticket if one is still present.
+ */
+async function clearStaleOpenTickets(
+  guild: Guild,
+  userId: string,
+): Promise<{ channelId: string } | null> {
+  const tickets = await findOpenTicketsForUser(
+    guild.id,
+    userId,
+  );
+
+  for (const ticket of tickets) {
+    const channel = await guild.channels
+      .fetch(ticket.channel_id)
+      .catch(() => null);
+
+    if (
+      !channel ||
+      channel.type !== ChannelType.GuildText
+    ) {
+      await markTicketDeleted(ticket.channel_id);
+      continue;
+    }
+
+    return { channelId: channel.id };
+  }
+
+  return null;
 }
 
 export async function createOrderTicket(
@@ -58,29 +95,75 @@ export async function createOrderTicket(
   opener: GuildMember,
   product: string,
 ): Promise<TextChannel> {
-  if (!isBotOwner(opener.id) && (await isBlacklisted(guild.id, opener.id))) {
+  if (
+    !isBotOwner(opener.id) &&
+    (await isBlacklisted(guild.id, opener.id))
+  ) {
     throw new Error("You are blacklisted from using the shop.");
   }
-  const settings = await ensureGuildSettings(guild.id);
-  if (!settings.ticket_category_id) {
-    throw new Error("An administrator needs to run /ticketsetup first.");
-  }
 
-  const existing = await findOpenTicketForUser(guild.id, opener.id);
-  if (existing) {
+  const settings = await ensureGuildSettings(guild.id);
+
+  if (!settings.ticket_category_id) {
     throw new Error(
-      `You already have an open ticket: <#${existing.channel_id}>`,
+      "An administrator needs to run /ticketsetup first.",
     );
   }
 
-  const category = await guild.channels.fetch(settings.ticket_category_id);
-  if (!category || category.type !== ChannelType.GuildCategory) {
-    throw new Error("The configured ticket category is missing. Run /ticketsetup again.");
+  const existing = await clearStaleOpenTickets(
+    guild,
+    opener.id,
+  );
+
+  if (existing) {
+    throw new Error(
+      `You already have an open ticket: <#${existing.channelId}>`,
+    );
   }
 
-  const whitelist = await getWhitelist(guild.id);
+  const category = await guild.channels.fetch(
+    settings.ticket_category_id,
+  );
+
+  if (
+    !category ||
+    category.type !== ChannelType.GuildCategory
+  ) {
+    throw new Error(
+      "The configured ticket category is missing. Run /ticketsetup again.",
+    );
+  }
+
   const botUserId = client.user?.id;
-  if (!botUserId) throw new Error("The bot is not ready yet.");
+
+  if (!botUserId) {
+    throw new Error("The bot is not ready yet.");
+  }
+
+  const botMember = await guild.members.fetch(botUserId);
+
+  const whitelist = await getWhitelist(guild.id);
+
+  const whitelistMembers = await Promise.all(
+    whitelist
+      .filter(
+        (userId) =>
+          userId !== opener.id &&
+          userId !== botUserId,
+      )
+      .map(async (userId) => {
+        try {
+          return await guild.members.fetch(userId);
+        } catch {
+          return null;
+        }
+      }),
+  );
+
+  const validWhitelistMembers = whitelistMembers.filter(
+    (member): member is GuildMember => member !== null,
+  );
+
   const permissionOverwrites = [
     {
       id: guild.id,
@@ -91,7 +174,7 @@ export async function createOrderTicket(
       allow: USER_TICKET_PERMISSIONS,
     },
     {
-      id: botUserId,
+      id: botMember.id,
       allow: [
         PermissionFlagsBits.ViewChannel,
         PermissionFlagsBits.SendMessages,
@@ -102,12 +185,10 @@ export async function createOrderTicket(
         PermissionFlagsBits.EmbedLinks,
       ],
     },
-    ...whitelist
-      .filter((userId) => userId !== opener.id && userId !== botUserId)
-      .map((userId) => ({
-        id: userId,
-        allow: USER_TICKET_PERMISSIONS,
-      })),
+    ...validWhitelistMembers.map((member) => ({
+      id: member.id,
+      allow: USER_TICKET_PERMISSIONS,
+    })),
   ];
 
   const channel = await guild.channels.create({
@@ -119,22 +200,48 @@ export async function createOrderTicket(
   });
 
   if (channel.type !== ChannelType.GuildText) {
-    await channel.delete("Could not create a text ticket channel");
-    throw new Error("Discord did not create a text ticket channel.");
+    await channel.delete(
+      "Could not create a text ticket channel",
+    );
+
+    throw new Error(
+      "Discord did not create a text ticket channel.",
+    );
   }
 
   try {
-    await saveTicket(channel.id, guild.id, opener.id, product);
+    await saveTicket(
+      channel.id,
+      guild.id,
+      opener.id,
+      product,
+    );
+
     const embed = new EmbedBuilder()
-      .setColor(0x17151d)
-      .setTitle("New order")
+      .setColor("#17151d")
       .setDescription(
-        `**Customer:** <@${opener.id}>\n**Item:**\n${product}`,
+        [
+          "**NEW ORDER**",
+          "",
+          "<:user:1563968304832454876> **Customer:**",
+          `<@${opener.id}>`,
+          "",
+          "<:Evidence:1563968238478561381> **Item:**",
+          `${product}`,
+          "",
+          "-# <a:danger:1545921518117195826> please wait until a staff helps you further.",
+        ].join("\n"),
       )
       .setFooter({
-        text: "STOCKW SHOP • A staff member will help you shortly.",
-      })
-      .setTimestamp();
+        text: `stockw. Today at ${new Date().toLocaleTimeString(
+          "en-GB",
+          {
+            hour: "2-digit",
+            minute: "2-digit",
+          },
+        )}`,
+      });
+
     await channel.send({
       content: `@everyone <@${opener.id}>`,
       embeds: [embed],
@@ -143,13 +250,18 @@ export async function createOrderTicket(
         users: [opener.id],
       },
     });
+
     await channel.send({
       embeds: [
         new EmbedBuilder()
           .setColor(0x17151d)
           .setTitle("Pick payment method")
-          .setDescription("Choose how you would like to pay.")
-          .setFooter({ text: "STOCKW SHOP" }),
+          .setDescription(
+            "Choose how you would like to pay.",
+          )
+          .setFooter({
+            text: "STOCKW SHOP",
+          }),
       ],
       components: [
         new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
@@ -157,7 +269,6 @@ export async function createOrderTicket(
             .setCustomId("ticket:payment-method")
             .setPlaceholder("Pick payment method")
             .addOptions(
-              { label: "PayPal", value: "paypal" },
               { label: "LTC", value: "ltc" },
               { label: "Tikkie", value: "tikkie" },
               { label: "SOL", value: "sol" },
@@ -168,7 +279,8 @@ export async function createOrderTicket(
       ],
     });
   } catch (error) {
-    await channel.delete("Ticket setup failed");
+    await markTicketDeleted(channel.id).catch(() => null);
+    await channel.delete("Ticket setup failed").catch(() => null);
     throw error;
   }
 
@@ -177,7 +289,11 @@ export async function createOrderTicket(
       const logChannel = await guild.channels.fetch(
         settings.ticket_log_channel_id,
       );
-      if (logChannel?.isTextBased() && "send" in logChannel) {
+
+      if (
+        logChannel?.isTextBased() &&
+        "send" in logChannel
+      ) {
         await logChannel.send({
           embeds: [
             new EmbedBuilder()
@@ -186,14 +302,21 @@ export async function createOrderTicket(
               .setDescription(
                 `**Channel:** <#${channel.id}>\n**Customer:** <@${opener.id}>\n**Item:** ${product.slice(0, 1500)}`,
               )
-              .setFooter({ text: "STOCKW SHOP • Ticket log" })
+              .setFooter({
+                text: "STOCKW SHOP • Ticket log",
+              })
               .setTimestamp(),
           ],
-          allowedMentions: { parse: [] },
+          allowedMentions: {
+            parse: [],
+          },
         });
       }
     } catch (error) {
-      logger.warn({ error, guildId: guild.id }, "Could not post ticket log");
+      logger.warn(
+        { error, guildId: guild.id },
+        "Could not post ticket log",
+      );
     }
   }
 
@@ -205,14 +328,22 @@ export async function grantBotOwnerTicketAccess(
   ownerIds: readonly string[],
 ): Promise<void> {
   const tickets = await listGuildTickets(guild.id);
+
   for (const ticket of tickets) {
-    const channel = await guild.channels.fetch(ticket.channel_id).catch(() => null);
-    if (!channel || channel.type !== ChannelType.GuildText) continue;
+    const channel = await guild.channels
+      .fetch(ticket.channel_id)
+      .catch(() => null);
+
+    if (!channel || channel.type !== ChannelType.GuildText) {
+      continue;
+    }
 
     for (const ownerId of ownerIds) {
       try {
+        const owner = await guild.members.fetch(ownerId);
+
         await channel.permissionOverwrites.edit(
-          ownerId,
+          owner,
           {
             ViewChannel: true,
             SendMessages: true,
@@ -220,11 +351,18 @@ export async function grantBotOwnerTicketAccess(
             AttachFiles: true,
             EmbedLinks: true,
           },
-          { reason: "Grant bot owner access to existing shop tickets" },
+          {
+            reason: "Grant bot owner access to existing shop tickets",
+          },
         );
       } catch (error) {
         logger.warn(
-          { error, guildId: guild.id, channelId: channel.id, ownerId },
+          {
+            error,
+            guildId: guild.id,
+            channelId: channel.id,
+            ownerId,
+          },
           "Could not grant bot owner access to ticket",
         );
       }
@@ -237,25 +375,30 @@ export async function handleCustomBoostButton(
 ): Promise<void> {
   const quantity = new TextInputBuilder()
     .setCustomId("quantity")
-    .setLabel("How many boosts?")
     .setStyle(TextInputStyle.Short)
     .setPlaceholder("For example: 14")
     .setRequired(true)
     .setMaxLength(3);
+
   const duration = new TextInputBuilder()
     .setCustomId("duration")
-    .setLabel("Duration: 1 month or 3 months")
     .setStyle(TextInputStyle.Short)
     .setPlaceholder("1 or 3")
     .setRequired(true)
     .setMaxLength(1);
+
   const modal = new ModalBuilder()
     .setCustomId("shop:custom-submit")
     .setTitle("Custom server boost")
-    .addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(quantity),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(duration),
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel("How many boosts?")
+        .setTextInputComponent(quantity),
+      new LabelBuilder()
+        .setLabel("Duration: 1 month or 3 months")
+        .setTextInputComponent(duration),
     );
+
   await interaction.showModal(modal);
 }
 
@@ -268,42 +411,69 @@ export async function handleCustomBoostSubmit(
       content: "This order can only be opened inside a server.",
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
 
-  const rawQuantity = interaction.fields.getTextInputValue("quantity").trim();
-  const rawDuration = interaction.fields.getTextInputValue("duration").trim();
+  const rawQuantity = interaction.fields
+    .getTextInputValue("quantity")
+    .trim();
+
+  const rawDuration = interaction.fields
+    .getTextInputValue("duration")
+    .trim();
+
   const quantity = Number(rawQuantity);
-  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
+
+  if (
+    !Number.isInteger(quantity) ||
+    quantity < 1 ||
+    quantity > 100
+  ) {
     await interaction.reply({
       content: "Enter a boost quantity from 1 to 100.",
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
+
   if (rawDuration !== "1" && rawDuration !== "3") {
     await interaction.reply({
       content: "Duration must be 1 or 3 months.",
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
 
   try {
-    const member = await interaction.guild.members.fetch(interaction.user.id);
+    const member = await interaction.guild.members.fetch(
+      interaction.user.id,
+    );
+
     const ticket = await createOrderTicket(
       client,
       interaction.guild,
       member,
       `Custom server boost — ${quantity} boosts for ${rawDuration} month(s). Price to confirm with staff.`,
     );
+
     await interaction.reply({
       content: `Your order ticket is ready: <#${ticket.id}>`,
       flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
+    logger.error(
+      { error },
+      "Custom boost ticket creation failed",
+    );
+
     const message =
-      error instanceof Error ? error.message : "Could not create your ticket.";
+      error instanceof Error
+        ? error.message
+        : "Could not create your ticket.";
+
     await interaction.reply({
       content: message,
       flags: MessageFlags.Ephemeral,
@@ -320,15 +490,18 @@ export async function handleShopItemSelection(
       content: "This shop can only be used inside a server.",
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
 
   const value = interaction.values[0];
+
   if (!value) {
     await interaction.reply({
       content: "Choose one of the available items.",
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
 
@@ -345,27 +518,45 @@ export async function handleShopItemSelection(
       ],
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  await interaction.deferReply({
+    flags: MessageFlags.Ephemeral,
+  });
 
   let product: string | undefined;
+
   if (value.startsWith("roblox:")) {
-    const accountId = Number(value.slice("roblox:".length));
-    if (!Number.isInteger(accountId) || accountId < 1) {
+    const accountId = Number(
+      value.slice("roblox:".length),
+    );
+
+    if (
+      !Number.isInteger(accountId) ||
+      accountId < 1
+    ) {
       await interaction.editReply({
         content: "That account listing is no longer available.",
       });
+
       return;
     }
-    const account = await getRobloxAccount(interaction.guild.id, accountId);
+
+    const account = await getRobloxAccount(
+      interaction.guild.id,
+      accountId,
+    );
+
     if (!account) {
       await interaction.editReply({
         content: "That account listing is no longer available.",
       });
+
       return;
     }
+
     product = robloxProduct(account).details;
   } else {
     product = productForStaticValue(value)?.details;
@@ -375,23 +566,36 @@ export async function handleShopItemSelection(
     await interaction.editReply({
       content: "That item is no longer available.",
     });
+
     return;
   }
 
   try {
-    const member = await interaction.guild.members.fetch(interaction.user.id);
+    const member = await interaction.guild.members.fetch(
+      interaction.user.id,
+    );
+
     const ticket = await createOrderTicket(
       client,
       interaction.guild,
       member,
       product,
     );
+
     await interaction.editReply({
       content: `Your order ticket is ready: <#${ticket.id}>`,
     });
   } catch (error) {
+    logger.error(
+      { error, userId: interaction.user.id },
+      "Shop ticket creation failed",
+    );
+
     const message =
-      error instanceof Error ? error.message : "Could not create your ticket.";
+      error instanceof Error
+        ? error.message
+        : "Could not create your ticket.";
+
     await interaction.editReply({
       content: message,
     });
@@ -402,6 +606,7 @@ export async function handlePaymentMethodSelection(
   interaction: StringSelectMenuInteraction,
 ): Promise<void> {
   const selected = interaction.values[0];
+
   const paymentMethods: Record<string, string> = {
     paypal: "PayPal",
     ltc: "LTC",
@@ -410,16 +615,22 @@ export async function handlePaymentMethodSelection(
     crypto: "Crypto",
     btc: "BTC",
   };
-  const method = selected ? paymentMethods[selected] : undefined;
+
+  const method = selected
+    ? paymentMethods[selected]
+    : undefined;
+
   if (!method) {
     await interaction.reply({
       content: "Choose one of the available payment methods.",
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
 
   const record = await getTicket(interaction.channelId);
+
   if (
     !interaction.guild ||
     !record ||
@@ -430,24 +641,33 @@ export async function handlePaymentMethodSelection(
       content: "This is not an open shop ticket.",
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
+
   if (
     !isBotOwner(interaction.user.id) &&
-    (await isBlacklisted(record.guild_id, interaction.user.id))
+    (await isBlacklisted(
+      record.guild_id,
+      interaction.user.id,
+    ))
   ) {
     await interaction.reply({
       content: "You are blacklisted from using the shop.",
       flags: MessageFlags.Ephemeral,
       allowedMentions: { parse: [] },
     });
+
     return;
   }
+
   if (interaction.user.id !== record.opener_user_id) {
     await interaction.reply({
-      content: "Only the customer who opened this ticket can choose the payment method.",
+      content:
+        "Only the customer who opened this ticket can choose the payment method.",
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
 
@@ -459,11 +679,15 @@ export async function handlePaymentMethodSelection(
         .setDescription(
           `<@${record.opener_user_id}> has chosen to pay with **${method}**.`,
         )
-        .setFooter({ text: "STOCKW SHOP" })
+        .setFooter({
+          text: "STOCKW SHOP",
+        })
         .setTimestamp(),
     ],
     components: [],
-    allowedMentions: { parse: [] },
+    allowedMentions: {
+      parse: [],
+    },
   });
 }
 
@@ -472,45 +696,69 @@ export async function closeTicketFromMessage(
   member: GuildMember,
 ): Promise<{ closed: boolean; message?: string }> {
   const record = await getTicket(channel.id);
+
   if (!record || record.status !== "open") {
     return {
       closed: false,
       message: "This channel is not an open shop ticket.",
     };
   }
+
   const canClose =
     isBotOwner(member.id) ||
     member.permissions.has(PermissionFlagsBits.Administrator) ||
     member.id === record.opener_user_id ||
     (await isWhitelisted(record.guild_id, member.id));
+
   if (!canClose) {
     return {
       closed: false,
       message:
-        "Only the ticket customer, whitelisted staff, or an administrator can close this ticket.",
+        "Only the ticket customer, only nix can delete/close this ticket",
     };
   }
 
   await markTicketClosed(channel.id);
-  await channel.permissionOverwrites.edit(record.opener_user_id, {
-    ViewChannel: false,
-    SendMessages: false,
-  });
-  const closedName = `closed-${channel.name.replace(/^ticket-/, "")}`.slice(
-    0,
-    100,
-  );
+
+  try {
+    const opener = await channel.guild.members.fetch(
+      record.opener_user_id,
+    );
+
+    await channel.permissionOverwrites.edit(opener, {
+      ViewChannel: false,
+      SendMessages: false,
+    });
+  } catch (error) {
+    logger.warn(
+      { error, channelId: channel.id },
+      "Could not update ticket opener permissions",
+    );
+  }
+
+  const closedName = `closed-${channel.name.replace(
+    /^ticket-/,
+    "",
+  )}`.slice(0, 100);
+
   await channel.setName(closedName);
+
   await channel.send({
     embeds: [
       new EmbedBuilder()
         .setColor(0x17151d)
         .setTitle("Ticket closed")
-        .setDescription("This ticket has been closed and saved for staff.")
-        .setFooter({ text: "STOCKW SHOP" })
+        .setDescription(
+          "This ticket has been closed and saved for staff.",
+        )
+        .setFooter({
+          text: "STOCKW SHOP",
+        })
         .setTimestamp(),
     ],
-    allowedMentions: { parse: [] },
+    allowedMentions: {
+      parse: [],
+    },
   });
 
   return { closed: true };
@@ -521,17 +769,24 @@ export async function sendDoneEmbed(
   member: GuildMember,
 ): Promise<{ sent: boolean; message?: string }> {
   const record = await getTicket(channel.id);
+
   if (!record || record.status !== "open") {
-    return { sent: false, message: "This channel is not an open shop ticket." };
+    return {
+      sent: false,
+      message: "This is not an open shop ticket.",
+    };
   }
+
   const canSend =
     isBotOwner(member.id) ||
     member.permissions.has(PermissionFlagsBits.Administrator) ||
     (await isWhitelisted(record.guild_id, member.id));
+
   if (!canSend) {
     return {
       sent: false,
-      message: "Only whitelisted staff or an administrator can use `.done`.",
+      message:
+        "Only whitelisted staff can use  `.done`.",
     };
   }
 
@@ -543,11 +798,16 @@ export async function sendDoneEmbed(
         .setDescription(
           `**Customer:** <@${record.opener_user_id}>\n\nHead over to <#1535992619153236109> and use this format \`+rep @clique37 (amount) (reason)\`.\n\nPlease submit a **SCREENSHOT**. Thanks for your purchase. <:865852discordclyde:1548061027520749641>`,
         )
-        .setFooter({ text: "STOCKW SHOP" })
+        .setFooter({
+          text: "STOCKW SHOP",
+        })
         .setTimestamp(),
     ],
-    allowedMentions: { parse: [] },
+    allowedMentions: {
+      parse: [],
+    },
   });
+
   return { sent: true };
 }
 
@@ -556,17 +816,24 @@ export async function requestTicketDeletion(
   member: GuildMember,
 ): Promise<{ requested: boolean; message?: string }> {
   const record = await getTicket(channel.id);
+
   if (!record || record.status === "deleted") {
-    return { requested: false, message: "This is not an active shop ticket." };
+    return {
+      requested: false,
+      message: "This is not an active shop ticket.",
+    };
   }
+
   const canDelete =
     isBotOwner(member.id) ||
     member.permissions.has(PermissionFlagsBits.Administrator) ||
     (await isWhitelisted(record.guild_id, member.id));
+
   if (!canDelete) {
     return {
       requested: false,
-      message: "Only whitelisted staff or an administrator can delete tickets.",
+      message:
+        "Only whitelisted staff can delete tickets.",
     };
   }
 
@@ -578,22 +845,32 @@ export async function requestTicketDeletion(
         .setDescription(
           "This permanently deletes the ticket channel and all of its messages. This cannot be undone.",
         )
-        .setFooter({ text: "STOCKW SHOP • Confirm only if you are sure." }),
+        .setFooter({
+          text: "STOCKW SHOP • Confirm only if you are sure.",
+        }),
     ],
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
-          .setCustomId(`ticket:delete-confirm:${channel.id}:${member.id}`)
+          .setCustomId(
+            `ticket:delete-confirm:${channel.id}:${member.id}`,
+          )
           .setLabel("Delete ticket")
           .setStyle(ButtonStyle.Danger),
+
         new ButtonBuilder()
-          .setCustomId(`ticket:delete-cancel:${channel.id}:${member.id}`)
+          .setCustomId(
+            `ticket:delete-cancel:${channel.id}:${member.id}`,
+          )
           .setLabel("Cancel")
           .setStyle(ButtonStyle.Secondary),
       ),
     ],
-    allowedMentions: { parse: [] },
+    allowedMentions: {
+      parse: [],
+    },
   });
+
   return { requested: true };
 }
 
@@ -602,29 +879,45 @@ export async function handleTicketDeleteButton(
 ): Promise<void> {
   const [prefix, action, channelId, requesterId] =
     interaction.customId.split(":");
-  if (prefix !== "ticket" || !channelId || !requesterId) return;
+
+  if (
+    prefix !== "ticket" ||
+    !channelId ||
+    !requesterId
+  ) {
+    return;
+  }
 
   if (interaction.user.id !== requesterId) {
     await interaction.reply({
-      content: "Only the staff member who requested this deletion can confirm it.",
+      content: "Only the staff member who requested deletion can use this button.",
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
 
   const guild = interaction.guild;
-  const member = await guild?.members.fetch(interaction.user.id).catch(() => null);
+
+  const member = await guild?.members
+    .fetch(interaction.user.id)
+    .catch(() => null);
+
   if (
     !guild ||
     !member ||
     (!isBotOwner(member.id) &&
-      !member.permissions.has(PermissionFlagsBits.Administrator) &&
+      !member.permissions.has(
+        PermissionFlagsBits.Administrator,
+      ) &&
       !(await isWhitelisted(guild.id, member.id)))
   ) {
     await interaction.reply({
-      content: "Only whitelisted staff or an administrator can delete tickets.",
+      content:
+        "Only whitelisted staff can use this.",
       flags: MessageFlags.Ephemeral,
     });
+
     return;
   }
 
@@ -634,51 +927,89 @@ export async function handleTicketDeleteButton(
         new EmbedBuilder()
           .setColor(0x17151d)
           .setTitle("Ticket deletion cancelled")
-          .setFooter({ text: "STOCKW SHOP" }),
+          .setFooter({
+            text: "STOCKW SHOP",
+          }),
       ],
       components: [],
     });
+
     return;
   }
+
   if (action !== "delete-confirm") return;
 
   const record = await getTicket(channelId);
-  if (!record || record.guild_id !== guild.id || record.status === "deleted") {
+
+  if (
+    !record ||
+    record.guild_id !== guild.id ||
+    record.status === "deleted"
+  ) {
     await interaction.reply({
-      content: "This ticket has already been deleted or is no longer available.",
+      content:
+        "This ticket has already been deleted or is no longer available.",
       flags: MessageFlags.Ephemeral,
     });
-    return;
-  }
-  const channel = await guild.channels.fetch(channelId);
-  if (!channel || channel.type !== ChannelType.GuildText) {
-    await interaction.reply({
-      content: "The ticket channel could not be found.",
-      flags: MessageFlags.Ephemeral,
-    });
+
     return;
   }
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const channel = await guild.channels
+    .fetch(channelId)
+    .catch(() => null);
+
+  if (
+    !channel ||
+    channel.type !== ChannelType.GuildText
+  ) {
+    await markTicketDeleted(channelId).catch(() => null);
+
+    await interaction.reply({
+      content: "The ticket channel was already missing. Its database record has been cleared.",
+      flags: MessageFlags.Ephemeral,
+    });
+
+    return;
+  }
+
+  await interaction.deferReply({
+    flags: MessageFlags.Ephemeral,
+  });
+
   try {
-    await channel.delete(`Ticket deletion confirmed by ${interaction.user.tag}`);
+    await channel.delete(
+      `Ticket deletion confirmed by ${interaction.user.tag}`,
+    );
   } catch (error) {
-    logger.error({ error, channelId }, "Could not delete ticket channel");
+    logger.error(
+      { error, channelId },
+      "Could not delete ticket channel",
+    );
+
     await interaction.editReply(
       "I could not delete the ticket channel. Check that the bot has Manage Channels permission.",
     );
+
     return;
   }
 
   try {
     await markTicketDeleted(channelId);
   } catch (error) {
-    logger.error({ error, channelId }, "Could not update deleted ticket record");
+    logger.error(
+      { error, channelId },
+      "Could not update deleted ticket record",
+    );
+
     await interaction.editReply(
       "The ticket channel and messages were deleted, but its saved status could not be updated.",
     );
+
     return;
   }
-  await interaction.editReply("Ticket and its messages have been deleted.");
-}
 
+  await interaction.editReply(
+    "Ticket and its messages have been deleted.",
+  );
+}
